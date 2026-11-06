@@ -74,8 +74,12 @@ def _equipment_events(prev: Optional[WorldState], cur: WorldState, t: float) -> 
 def _hold_events(prev: Optional[WorldState], cur: WorldState, t: float) -> list[Event]:
     out: list[Event] = []
     before = {h.container_id: h for h in prev.holds} if prev else {}
+    changed = [h for h in cur.holds if h.container_id not in before
+               or h.released != before[h.container_id].released]
+    if not changed:
+        return out
     call_of = {c.container_id: call for call, rows in cur.manifests.items() for c in rows}
-    for h in cur.holds:
+    for h in changed:
         p = before.get(h.container_id)
         detail = {"hold_since": h.hold_since, "call_id": call_of.get(h.container_id)}
         if p is None and not h.released:

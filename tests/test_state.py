@@ -27,10 +27,17 @@ CORE3_KINDS = {EV_ARRIVAL, EV_BERTHED, EV_DEPARTED, EV_CRANE_DOWN, EV_CRANE_BACK
 
 
 def _sim(scenario, tmp_path):
-    from core.skeleton import Skeleton
+    from core.loop import Loop
     from vendor import TerminalAPI
     api = TerminalAPI(scenario, data_xlsx=str(WORKBOOK), log_path=str(tmp_path / scenario / "actions.jsonl"))
-    return api, Skeleton(api, tmp_path / scenario)
+    return api, Loop(api, tmp_path / scenario)
+
+
+def _advance(api, loop):
+    """One tick of the real loop, then 15 minutes."""
+    loop.step()
+    api.call("advance_time", {"minutes": 15})
+    loop.tick += 1
 
 
 # --------------------------------------------------------------------------
@@ -70,12 +77,12 @@ def _compare(state, raw):
 
 @needs_workbook
 def test_snapshot_matches_raw_tool_output_on_20_random_ticks(tmp_path):
-    api, sk = _sim("practice_02", tmp_path)
+    api, loop = _sim("practice_02", tmp_path)
     picks = set(random.Random(7).sample(range(480), 20))
     checked = 0
     builder = StateBuilder(api)
     while not api.call("get_current_time")["finished"]:
-        if sk.tick in picks:
+        if loop.tick in picks:
             state = builder.build(refresh_manifests=True)
             raw = {"clock": api.call("get_current_time"), "schedule": api.call("get_vessel_schedule"),
                    "equipment": api.call("get_equipment_status"), "yard": api.call("get_yard_status"),
@@ -84,9 +91,7 @@ def test_snapshot_matches_raw_tool_output_on_20_random_ticks(tmp_path):
                                 for r in raw["schedule"]}
             _compare(state, raw)
             checked += 1
-        sk._decide(api.now.to_pydatetime())
-        api.call("advance_time", {"minutes": 15})
-        sk.tick += 1
+        _advance(api, loop)
     assert checked == 20
 
 
@@ -98,7 +103,7 @@ def test_snapshot_matches_raw_tool_output_on_20_random_ticks(tmp_path):
 def test_every_event_type_fires_across_the_5_scenarios(tmp_path):
     seen = set()
     for scenario in [f"practice_0{i}" for i in range(1, 6)]:
-        api, sk = _sim(scenario, tmp_path)
+        api, loop = _sim(scenario, tmp_path)
         prev = None
         while True:
             cur = build_state(api)
@@ -106,9 +111,7 @@ def test_every_event_type_fires_across_the_5_scenarios(tmp_path):
             prev = cur
             if cur.now >= cur.scenario_end:
                 break
-            sk._decide(cur.now)
-            api.call("advance_time", {"minutes": 15})
-            sk.tick += 1
+            _advance(api, loop)
         assert api.violations == []
     assert CORE3_KINDS <= seen, f"never fired: {CORE3_KINDS - seen}"
 
