@@ -69,12 +69,24 @@ CRANE_SPLIT: dict[str, tuple[tuple[str, int], ...]] = {
 }
 
 
+PARTS = ("berths", "cranes", "trucks", "yard")
+
+
 class SkeletonAgent:
-    """Rules-only planner. propose(state, events) -> (actions, requests)."""
+    """Rules-only planner. propose(state, events) -> (actions, requests).
+
+    `parts` limits what it plans, so real agents can take over one job at a time
+    (e.g. SkeletonAgent(parts=("cranes", "trucks")) next to the berth and yard agents).
+    The loop's rules-only fallback always uses all parts.
+    """
 
     name = AGENT
 
-    def __init__(self) -> None:
+    def __init__(self, parts: tuple[str, ...] = PARTS) -> None:
+        unknown = set(parts) - set(PARTS)
+        if unknown:
+            raise ValueError(f"unknown skeleton parts {sorted(unknown)}")
+        self.parts = tuple(parts)
         self.escalations: list[str] = []     # drained and logged by the loop
         self._flagged: set[str] = set()
 
@@ -85,10 +97,14 @@ class SkeletonAgent:
 
     def propose(self, state: WorldState, events: list[Event]) -> tuple[list[Action], list[Request]]:
         actions: list[Action] = []
-        actions += self._berths(state)
-        actions += self._cranes(state)
-        actions += self._trucks(state)
-        actions += self._placements(state)
+        if "berths" in self.parts:
+            actions += self._berths(state)
+        if "cranes" in self.parts:
+            actions += self._cranes(state)
+        if "trucks" in self.parts:
+            actions += self._trucks(state)
+        if "yard" in self.parts:
+            actions += self._placements(state)
         return actions, []
 
     # ------------------------------------------------------------ berths
