@@ -17,45 +17,16 @@ hands them here.
 """
 from __future__ import annotations
 
-import json
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
 
 import guard
+from core.log import DecisionLog  # SAFE-3: decisions.jsonl + transcript, feed, tick snapshots
 from core.state import build_state, hours, invalidate
 from core.types import (TOOL_ASSIGN_BERTH, TOOL_DISPATCH_TRUCKS, TOOL_PLACE, TOOL_PLAN_CRANES,
                         TOOL_RELEASE, Action, Decision, WorldState)
 
-
-def _json_default(o: Any) -> Any:
-    if hasattr(o, "isoformat"):
-        return o.isoformat()
-    if isinstance(o, (set, frozenset, tuple)):
-        return list(o)
-    if hasattr(o, "items"):
-        return dict(o)
-    return str(o)
-
-
-class DecisionLog:
-    """Append-only decisions.jsonl (minimal; SAFE-3 extends it with transcript and feed)."""
-
-    def __init__(self, run_dir: Path):
-        self.path = Path(run_dir) / "decisions.jsonl"
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text("", encoding="utf-8")
-
-    def write(self, d: Decision) -> None:
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(asdict(d), ensure_ascii=False, default=_json_default) + "\n")
-
-    def note(self, tick: int, state: WorldState, agent: str, choice: str, reason: str,
-             saw: Optional[dict] = None) -> None:
-        """Non-action entries: escalations, exceptions, invariant breaches, mismatches."""
-        self.write(Decision(tick=tick, t=hours(state), agent=agent, saw=saw or {}, options=(),
-                            choice=choice, reason=reason, guard_ok=True, guard_reason="n/a (not an action)",
-                            tool_result=None, backend="rules"))
+__all__ = ["DecisionLog", "Executor"]
 
 
 class Executor:

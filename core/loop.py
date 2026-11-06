@@ -34,6 +34,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+from core import log as runlog
 from core.events import detect_events
 from core.executor import DecisionLog, Executor
 from core.skeleton import SkeletonAgent
@@ -159,6 +160,7 @@ class Loop:
     def step(self) -> WorldState:
         t0 = time.perf_counter()
         state = build_state(self.api)
+        runlog.tick_snapshot(self.tick, state)          # SAFE-3: ticks.jsonl for the timeline
         events = detect_events(self.prev, state)
         self.prev = state
         self.ex.tick = self.tick
