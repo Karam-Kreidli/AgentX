@@ -155,6 +155,11 @@ def active() -> bool:
     return _run is not None
 
 
+def current_tick() -> Optional[int]:
+    """The tick of the latest decision or snapshot, or None before any."""
+    return _run.tick if _run is not None else None
+
+
 def stats() -> dict:
     """Lines written per file and write errors for the current run."""
     if _run is None:
