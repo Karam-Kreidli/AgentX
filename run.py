@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from core.skeleton import Skeleton  # noqa: E402
+from core.loop import Loop  # noqa: E402
 from vendor import TerminalAPI  # noqa: E402
 
 PRACTICE = [f"practice_0{i}" for i in range(1, 6)]
@@ -32,7 +32,7 @@ def run_one(scenario: str, data: Path, key: Path | None, runs: Path) -> dict:
     t0 = time.perf_counter()
     api = TerminalAPI(scenario, data_xlsx=str(data), key_xlsx=str(key) if key else None,
                       log_path=str(run_dir / "actions.jsonl"))
-    summary = Skeleton(api, run_dir).run()
+    summary = Loop(api, run_dir).run()
     summary["wall_s"] = round(time.perf_counter() - t0, 1)
     return summary
 
@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--data", type=Path, default=DEFAULT_DATA, help="data workbook (default: data/...)")
     p.add_argument("--key", type=Path, help="answer-key workbook, needed for hidden_* scenarios")
     p.add_argument("--runs", type=Path, default=ROOT / "runs", help="output folder (default: runs/)")
-    p.add_argument("--no-llm", action="store_true", help="rules only (the skeleton never uses an LLM)")
+    p.add_argument("--no-llm", action="store_true", help="rules only (no LLM is used yet)")
     p.add_argument("--agent", choices=["skeleton"], default="skeleton")
     a = p.parse_args(argv)
 
