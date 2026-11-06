@@ -1,0 +1,7 @@
+# Python 3.11. Keep this list minimal; every addition needs a reason in the PR.
+numpy==2.3.5        # toolkit
+pandas==2.3.3       # toolkit (written for pandas 2.x; do not move to 3.x)
+openpyxl==3.1.5     # toolkit reads the workbook
+httpx==0.28.1       # LLM client
+pydantic==2.14.3    # LLM output schemas
+pytest==9.2.0       # tests

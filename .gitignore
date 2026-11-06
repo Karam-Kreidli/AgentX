@@ -1,0 +1,35 @@
+# Secrets
+.env
+.vllm.env
+*.key
+
+# Run output (toolkit writes runs/P2/<scenario>/actions.jsonl)
+runs/
+
+# Generated test data and the hidden-scenario answer key
+data/variants/
+*ANSWER_KEY*.xlsx
+
+# Competition workbook (shared privately; put it in data/ yourself)
+data/*.xlsx
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+~$*.xlsx
+
+*.md
+
+# Docs are shared privately. Exception: GitHub only uses the PR template if it's committed.
+!.github/pull_request_template.md
+!README.md
