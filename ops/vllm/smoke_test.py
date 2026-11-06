@@ -1,6 +1,9 @@
 """LLM-1 smoke test: run from a teammate's laptop (or the VM) against the endpoint.
 
+    python ops/vllm/smoke_test.py          # reads LLM_BASE_URL, LLM_API_KEY, LLM_MODEL from .env
     LLM_BASE_URL=http://localhost:8000/v1 LLM_API_KEY=... LLM_MODEL=qwen python ops/vllm/smoke_test.py
+
+Values already set in the environment win over .env.
 
 Checks:
   1. A request without the key is refused (401).
@@ -17,16 +20,34 @@ import time
 
 import httpx
 
+def load_dotenv(path):
+    """Minimal .env reader (no extra dependency). Never prints values."""
+    try:
+        lines = open(path, encoding="utf-8").read().splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        value = value.strip().strip('"').strip("'")
+        if value:
+            os.environ.setdefault(name.strip(), value)
+
+
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env"))
+
 BASE = os.environ.get("LLM_BASE_URL", "http://localhost:8000/v1").rstrip("/")
 KEY = os.environ.get("LLM_API_KEY", "")
 MODEL = os.environ.get("LLM_MODEL", "qwen")
 if not KEY:
-    sys.exit("Set LLM_API_KEY")
+    sys.exit("Set LLM_API_KEY (in .env or the environment)")
 
 # Turn thinking off (Qwen3.6 thinks by default) / keep gpt-oss reasoning short.
 EXTRA = (
     {"chat_template_kwargs": {"enable_thinking": False}}
-    if MODEL.startswith("qwen")
+    if "qwen" in MODEL.lower()
     else {"reasoning_effort": "low"}
 )
 
