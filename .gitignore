@@ -11,7 +11,8 @@ data/variants/
 *ANSWER_KEY*.xlsx
 
 # Competition workbook (shared privately; put it in data/ yourself)
-data/*.xlsx
+data/
+toolskit/
 
 # Python
 __pycache__/
