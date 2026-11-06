@@ -28,3 +28,18 @@ def _cache_workbook_reads():
     p2_terminal_api.sheets = cached
     yield
     p2_terminal_api.sheets = original
+
+
+@pytest.fixture(scope="session")
+def multi_runs(tmp_path_factory):
+    """Run the 5 practice scenarios once with the real agents (run.py --agent multi).
+    Returns {scenario: (summary, run_dir)}. Shared by the BERTH-1 and YARD-1 tests."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    workbook = root / "data" / "P2_Container_Terminal_Data.xlsx"
+    if not workbook.exists():
+        pytest.skip("workbook not in data/")
+    from run import run_one
+    out = tmp_path_factory.mktemp("multi")
+    return {s: (run_one(s, workbook, None, out, "multi"), out / s)
+            for s in [f"practice_0{i}" for i in range(1, 6)]}

@@ -19,20 +19,31 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+from agents.berth import BerthAgent  # noqa: E402
+from agents.yard import YardAgent  # noqa: E402
 from core.loop import Loop  # noqa: E402
+from core.skeleton import SkeletonAgent  # noqa: E402
 from vendor import TerminalAPI  # noqa: E402
 
 PRACTICE = [f"practice_0{i}" for i in range(1, 6)]
 DEFAULT_DATA = ROOT / "data" / "P2_Container_Terminal_Data.xlsx"
 
 
-def run_one(scenario: str, data: Path, key: Path | None, runs: Path) -> dict:
+def make_agents(kind: str) -> list:
+    """The agents the loop runs. 'multi' uses every real agent built so far; the skeleton
+    covers the jobs no real agent does yet. 'skeleton' is the rules-only baseline."""
+    if kind == "skeleton":
+        return [SkeletonAgent()]
+    return [BerthAgent(), SkeletonAgent(parts=("cranes", "trucks")), YardAgent()]
+
+
+def run_one(scenario: str, data: Path, key: Path | None, runs: Path, agent: str = "multi") -> dict:
     run_dir = runs / scenario
     run_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.perf_counter()
     api = TerminalAPI(scenario, data_xlsx=str(data), key_xlsx=str(key) if key else None,
                       log_path=str(run_dir / "actions.jsonl"))
-    summary = Loop(api, run_dir).run()
+    summary = Loop(api, run_dir, agents=make_agents(agent)).run()
     summary["wall_s"] = round(time.perf_counter() - t0, 1)
     return summary
 
@@ -66,7 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--key", type=Path, help="answer-key workbook, needed for hidden_* scenarios")
     p.add_argument("--runs", type=Path, default=ROOT / "runs", help="output folder (default: runs/)")
     p.add_argument("--no-llm", action="store_true", help="rules only (no LLM is used yet)")
-    p.add_argument("--agent", choices=["skeleton"], default="skeleton")
+    p.add_argument("--agent", choices=["multi", "skeleton"], default="multi",
+                   help="multi: berth + yard agents (skeleton covers cranes and trucks); skeleton: rules-only")
     a = p.parse_args(argv)
 
     if not a.data.exists():
@@ -78,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     rows = []
     for s in scenarios:
         try:
-            rows.append(run_one(s, a.data, a.key, a.runs))
+            rows.append(run_one(s, a.data, a.key, a.runs, a.agent))
         except Exception as e:  # a broken scenario must not stop the others
             print(f"[{s}] could not run: {type(e).__name__}: {e}", file=sys.stderr)
     if rows:
