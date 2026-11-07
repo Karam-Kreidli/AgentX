@@ -263,15 +263,19 @@ def test_snapshots_failing_for_good_still_stop_at_the_window_end(tmp_path, monke
     loop = Loop(api, tmp_path / "practice_05", max_ticks=5000)
     s = loop.run()
     assert loop.tick < 5 * 24 * 12 + 5                                  # at most a 5-min tick per step
-    assert "state_error" in s and s["violations"] == []
+    assert api.now >= api.end and s["loop"]["stopped_early"] is None    # it reached the window end
+    assert "summary_error" in s and s["violations"] == []
 
 
 @needs_workbook
-def test_no_snapshot_ever_gives_up_after_one_window(tmp_path, monkeypatch):
-    from core.loop import NO_STATE_MAX_TICKS
+def test_no_snapshot_ever_stops_cleanly_after_5_tries(tmp_path, monkeypatch):
+    # SAFE-4: a simulator that can't be read at all is retried FIRST_SNAPSHOT_TRIES times,
+    # then the run stops cleanly (it used to keep advancing for one full window).
+    from core.loop import FIRST_SNAPSHOT_TRIES
     _failing_build_state(monkeypatch, lambda k: True)
     api = _api("practice_05", tmp_path)
     loop = Loop(api, tmp_path / "practice_05", max_ticks=100_000)
     s = loop.run()                                                       # must not raise
-    assert loop.tick == NO_STATE_MAX_TICKS
-    assert s["honest_turnaround_h"] is None and "state_error" in s
+    assert loop.tick == 0 and s["loop"]["exceptions"] == FIRST_SNAPSHOT_TRIES == 5
+    assert s["loop"]["stopped_early"] == "no_state"
+    assert s["honest_turnaround_h"] is None and "summary_error" in s

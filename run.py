@@ -12,6 +12,7 @@ Output per scenario in runs/<scenario>/:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -43,13 +44,30 @@ def run_one(scenario: str, data: Path, key: Path | None, runs: Path, agent: str 
     run_dir = runs / scenario
     run_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.perf_counter()
-    api = TerminalAPI(scenario, data_xlsx=str(data), key_xlsx=str(key) if key else None,
-                      log_path=str(run_dir / "actions.jsonl"))
-    llm_client.new_scenario(run_dir / "llm_calls.jsonl")     # fresh call budget per scenario (LLM-2)
-    summary = Loop(api, run_dir, agents=make_agents(agent)).run()
+    try:
+        api = TerminalAPI(scenario, data_xlsx=str(data), key_xlsx=str(key) if key else None,
+                          log_path=str(run_dir / "actions.jsonl"))
+        llm_client.new_scenario(run_dir / "llm_calls.jsonl")     # fresh call budget per scenario (LLM-2)
+        summary = Loop(api, run_dir, agents=make_agents(agent)).run()
+    except Exception as e:      # SAFE-4: a scenario that can't even start still gets a summary.json
+        _write_failed_summary(run_dir, scenario, e, time.perf_counter() - t0)
+        raise
     summary["wall_s"] = round(time.perf_counter() - t0, 1)
-    summary["llm"] = llm_client.get_client().stats()
+    try:
+        summary["llm"] = llm_client.get_client().stats()
+    except Exception as e:
+        summary["llm"] = {"error": type(e).__name__}
     return summary
+
+
+def _write_failed_summary(run_dir: Path, scenario: str, e: Exception, wall_s: float) -> None:
+    """Overwrites any summary.json from an earlier run, so a stale one can't pass for this one."""
+    stub = {"scenario": scenario, "crashed": True, "error": f"{type(e).__name__}: {e}"[:300],
+            "violations": [], "vessels_departed": 0, "vessels_total": None, "wall_s": round(wall_s, 1)}
+    try:
+        (run_dir / "summary.json").write_text(json.dumps(stub, indent=2), encoding="utf-8")
+    except Exception as w:
+        print(f"[{scenario}] could not write summary.json: {type(w).__name__}: {w}", file=sys.stderr)
 
 
 def print_table(rows: list[dict]) -> None:
