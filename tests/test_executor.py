@@ -224,3 +224,54 @@ def test_tick_is_5_minutes_when_busy_else_15():
     assert Loop._tick_minutes(st("expected", eta=datetime(2026, 9, 1, 6, 10))) == 5  # ship due soon
     assert Loop._tick_minutes(st("arrived")) == 5                                    # waiting for a berth
     assert Loop._tick_minutes(st("working", crane_status="working")) == 15           # all cranes busy
+
+
+# ---------------------------------------------------------------- snapshot failures (never crash, never run away)
+
+def _failing_build_state(monkeypatch, fail):
+    """Make core.loop.build_state raise whenever fail(call_number) is true."""
+    import core.loop as loop_mod
+    real = loop_mod.build_state
+    n = {"calls": 0}
+
+    def flaky(api):
+        n["calls"] += 1
+        if fail(n["calls"]):
+            raise RuntimeError("clock read failed")
+        return real(api)
+
+    monkeypatch.setattr(loop_mod, "build_state", flaky)
+    return n
+
+
+@needs_workbook
+def test_first_snapshot_failing_does_not_end_the_run(tmp_path, monkeypatch):
+    # The first two snapshots fail. Before the fix the loop stopped at once and summary() crashed.
+    _failing_build_state(monkeypatch, lambda k: k <= 2)
+    api = _api("practice_05", tmp_path)
+    s = Loop(api, tmp_path / "practice_05").run()
+    assert s["loop"]["exceptions"] == 2
+    assert s["violations"] == [] and s["vessels_departed"] == 4        # same as a clean run
+
+
+@needs_workbook
+def test_snapshots_failing_for_good_still_stop_at_the_window_end(tmp_path, monkeypatch):
+    # Every snapshot after the 10th fails. The loop must stop near the end of the 5-day window
+    # (its own clock estimate), not keep advancing on a stale snapshot until max_ticks.
+    _failing_build_state(monkeypatch, lambda k: k > 10)
+    api = _api("practice_05", tmp_path)
+    loop = Loop(api, tmp_path / "practice_05", max_ticks=5000)
+    s = loop.run()
+    assert loop.tick < 5 * 24 * 12 + 5                                  # at most a 5-min tick per step
+    assert "state_error" in s and s["violations"] == []
+
+
+@needs_workbook
+def test_no_snapshot_ever_gives_up_after_one_window(tmp_path, monkeypatch):
+    from core.loop import NO_STATE_MAX_TICKS
+    _failing_build_state(monkeypatch, lambda k: True)
+    api = _api("practice_05", tmp_path)
+    loop = Loop(api, tmp_path / "practice_05", max_ticks=100_000)
+    s = loop.run()                                                       # must not raise
+    assert loop.tick == NO_STATE_MAX_TICKS
+    assert s["honest_turnaround_h"] is None and "state_error" in s

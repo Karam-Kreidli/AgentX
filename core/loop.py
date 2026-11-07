@@ -46,6 +46,7 @@ TICK_NORMAL_MIN = 15
 TICK_BUSY_MIN = 5
 TICK_BUDGET_S = 10.0          # watchdog: wall-clock seconds per tick before falling back to rules-only
 MAX_ROUNDS = 3                # propose/execute rounds per tick
+NO_STATE_MAX_TICKS = 5 * 24 * 60 // TICK_NORMAL_MIN   # a 5-day window at 15 min: stop if no snapshot ever succeeds
 
 
 def _optional(module: str):
@@ -203,9 +204,11 @@ class Loop:
 
     # ------------------------------------------------------------------ whole run
     def run(self) -> dict:
+        est_now = None                        # our own clock: last snapshot time + minutes advanced since
         while self.tick < self.max_ticks:
             try:
                 state = self.step()
+                est_now = state.now
             except Exception as e:            # never crash: log, then keep the clock moving
                 self.counts["exceptions"] += 1
                 state = self.prev
@@ -213,19 +216,42 @@ class Loop:
                     self._note(state, "loop", "exception", f"{type(e).__name__}: {e}"[:200],
                                {"trace": traceback.format_exc(limit=3)})
                 self.rules_only_next = True
-            if state is None or state.now >= state.scenario_end:
-                break
-            self.api.call("advance_time", {"minutes": self._tick_minutes(state)})
+            if state is None:
+                # No snapshot yet (e.g. the very first clock read failed). Keep the clock moving
+                # and try again next tick, but give up after a full scenario's worth of ticks.
+                if self.tick >= NO_STATE_MAX_TICKS:
+                    break
+                minutes = TICK_NORMAL_MIN
+            else:
+                # A failed tick leaves `state` at the previous snapshot, so compare our own clock
+                # estimate with the end of the window, not the stale snapshot time.
+                if (est_now or state.now) >= state.scenario_end:
+                    break
+                minutes = self._tick_minutes(state)
+            self.api.call("advance_time", {"minutes": minutes})
+            if est_now is not None:
+                est_now += timedelta(minutes=minutes)
             self.tick += 1
         return self.summary()
 
     def summary(self) -> dict:
-        s = self.api.run_summary()
-        st = build_state(self.api)
-        honest = [((v.departed_at or st.scenario_end) - v.actual_arrival).total_seconds() / 3600
-                  for v in st.ships if v.actual_arrival]
-        s["honest_turnaround_h"] = round(sum(honest) / len(honest), 2) if honest else None
-        s["unfinished_calls"] = [v.call_id for v in st.ships if v.status != SHIP_DEPARTED]
+        try:
+            s = self.api.run_summary()
+        except Exception as e:                # never crash, even at the very end
+            s = {"summary_error": f"{type(e).__name__}: {e}"[:200]}
+        try:
+            st = build_state(self.api)
+        except Exception as e:
+            st = self.prev                    # last good snapshot, if any
+            s["state_error"] = f"{type(e).__name__}: {e}"[:200]
+        if st is not None:
+            honest = [((v.departed_at or st.scenario_end) - v.actual_arrival).total_seconds() / 3600
+                      for v in st.ships if v.actual_arrival]
+            s["honest_turnaround_h"] = round(sum(honest) / len(honest), 2) if honest else None
+            s["unfinished_calls"] = [v.call_id for v in st.ships if v.status != SHIP_DEPARTED]
+        else:
+            s["honest_turnaround_h"] = None
+            s["unfinished_calls"] = []
         s["skeleton_exceptions"] = self.counts["exceptions"]
         s["loop"] = {**self.counts, "ticks": self.tick, "actions_sent": self.ex.sent,
                      "actions_refused": self.ex.refused, "mismatches": self.ex.mismatches}
