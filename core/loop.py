@@ -7,7 +7,9 @@ Every tick:
   1. build state            core.state.build_state            (CORE-3)
   2. detect events          core.events.detect_events         (CORE-3)
   3. agents propose         each agent's propose(state, events) -> (actions, requests)
-  4. coordinator            coordinator.decide(requests, state) -> (grants, options)   (CORE-5, once it exists)
+  4. coordinator            coordinator.decide(requests, state) -> (grants, options)   (CORE-5)
+                            Grants are binding: every agent with a `grants` attribute gets
+                            {(resource, call_id): granted} and proposes again within them.
   5. supervisor             llm.supervisor.decide(event, options) -> (option_id, sentence)  (LLM-4, once it exists)
   6. execute                core.executor: guard -> simulator -> log -> re-read
   7. invariant monitor      core.invariants.check_state(state) -> breaches   (SAFE-2, once it exists)
@@ -73,6 +75,7 @@ class Loop:
         self.prev: Optional[WorldState] = None
         self.rules_only_next = False
         self.counts = {"exceptions": 0, "watchdog": 0, "breaches": 0, "rules_only_ticks": 0}
+        self._grant_seen: dict = {}          # (agent, resource, call_id) -> last grant status noted
 
     # ------------------------------------------------------------------ helpers
     def _note(self, state, agent, choice, reason, saw=None):
@@ -85,34 +88,55 @@ class Loop:
             if hasattr(a, "escalations"):
                 a.escalations.clear()
 
-    def _propose(self, state, events, agents) -> tuple[list[Action], list, bool]:
-        """Collect actions and requests. Returns (actions, requests, fell_back)."""
-        actions, requests = [], []
+    def _agent_failed(self, state, agent, e, then: str = "this tick runs rules-only") -> None:
+        self.counts["exceptions"] += 1
+        self._note(state, getattr(agent, "name", "agent"), "exception",
+                   f"{type(e).__name__}: {e}"[:200] + f"; {then}.",
+                   {"trace": traceback.format_exc(limit=3)})
+
+    def _propose(self, state, events, agents) -> tuple[list[tuple[Any, list[Action]]], list, bool]:
+        """Collect actions (per agent, in order) and requests. Returns (by_agent, requests, fell_back)."""
+        by_agent, requests = [], []
         for a in agents:
             try:
                 acts, reqs = a.propose(state, events)
-                actions += list(acts)
+                by_agent.append((a, list(acts)))
                 requests += list(reqs)
             except Exception as e:
-                self.counts["exceptions"] += 1
-                self._note(state, getattr(a, "name", "agent"), "exception",
-                           f"{type(e).__name__}: {e}"[:200] + "; this tick runs rules-only.",
-                           {"trace": traceback.format_exc(limit=3)})
+                self._agent_failed(state, a, e)
                 acts, _ = self.rules.propose(state, events)
-                return list(acts), [], True
-        return actions, requests, False
+                return [(self.rules, list(acts))], [], True
+        return by_agent, requests, False
 
-    def _coordinate(self, state, events, requests) -> list[Action]:
-        """CORE-5 coordinator and LLM-4 supervisor, once they exist. Returns extra actions to run."""
+    def _coordinate(self, state, events, requests, by_agent) -> list[Action]:
+        """CORE-5 coordinator and LLM-4 supervisor. Hands each agent its grants and lets the
+        agents that take grants propose again within them (updates `by_agent` in place).
+        Returns extra actions to run (the chosen option's)."""
         if not requests:
             return []
         coord = _optional("coordinator")
         if coord is None:
             return []
         grants, options = coord.decide(requests, state)
+        bound: dict = {}
         for g in grants:
-            self._note(state, "coordinator", f"grant:{g.status}", g.reason,
-                       {"request": g.request, "granted": g.granted})
+            r = g.request
+            bound.setdefault(r.agent, {})[(r.resource, r.call_id)] = g.granted
+            key = (r.agent, r.resource, r.call_id)
+            if self._grant_seen.get(key) != g.status:          # decisions.jsonl: changes only
+                self._grant_seen[key] = g.status
+                self._note(state, "coordinator", f"grant:{g.status}", g.reason,
+                           {"request": r, "granted": g.granted})
+        for i, (a, _) in enumerate(by_agent):
+            if not hasattr(a, "grants"):
+                continue
+            a.grants = bound.get(getattr(a, "name", None), {})
+            try:
+                acts, _ = a.propose(state, events)
+                by_agent[i] = (a, list(acts))
+            except Exception as e:                          # act on nothing rather than unchecked
+                self._agent_failed(state, a, e, "its actions are dropped this round")
+                by_agent[i] = (a, [])
         if not options:
             return []
         chosen, sentence = options[0].id, options[0].template
@@ -124,6 +148,8 @@ class Loop:
                 self._note(state, "supervisor", "exception", f"{type(e).__name__}: {e}"[:200] + "; using option 0.")
         pick = next((o for o in options if o.id == chosen), options[0])
         self._note(state, "supervisor", f"option:{pick.id}", sentence, {"options": [o.id for o in options]})
+        if hasattr(coord, "chosen"):
+            coord.chosen(pick.id)
         return list(pick.actions)
 
     def _invariants(self, state) -> None:
@@ -172,17 +198,20 @@ class Loop:
 
         for rnd in range(MAX_ROUNDS):
             agents = [self.rules] if rules_only else self.agents
-            actions, requests, fell_back = self._propose(state, events if rnd == 0 else [], agents)
+            evs = events if rnd == 0 else []
+            by_agent, requests, fell_back = self._propose(state, evs, agents)
             rules_only = rules_only or fell_back
             if not rules_only and time.perf_counter() - t0 > self.tick_budget_s:
                 rules_only = self._watchdog(state)
-                actions, requests = list(self.rules.propose(state, events if rnd == 0 else [])[0]), []
+                by_agent, requests = [(self.rules, list(self.rules.propose(state, evs)[0]))], []
+            extra: list[Action] = []
             if not rules_only:
                 try:
-                    actions += self._coordinate(state, events if rnd == 0 else [], requests)
+                    extra = self._coordinate(state, evs, requests, by_agent)
                 except Exception as e:
                     self.counts["exceptions"] += 1
                     self._note(state, "coordinator", "exception", f"{type(e).__name__}: {e}"[:200])
+            actions = [a for _, acts in by_agent for a in acts] + extra
             self._drain_escalations(state, agents)
             if not actions:
                 break
