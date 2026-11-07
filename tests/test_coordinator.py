@@ -136,8 +136,22 @@ class FakeBound:
 
 
 def judged(monkeypatch, cid="S2"):
+    monkeypatch.setattr(C, "OFFER_FORECAST_WRITE_OFFS", True)
     monkeypatch.setattr(C, "_forecast", lambda st: ({"S1": 999, cid: 0}, FakeBound([cid])))
     return world([ship("S1"), ship(cid, "B2", order_eta=1)], boxes("S1", 10) + boxes(cid, 10), free={"A": 100})
+
+
+def test_forecast_write_offs_are_off_by_default_and_the_ship_is_served(monkeypatch):
+    monkeypatch.setattr(C, "_forecast", lambda st: ({"S1": 999, "S2": 0}, FakeBound(["S2"])))
+    st = world([ship("S1"), ship("S2", "B2", order_eta=1)], boxes("S1", 10) + boxes("S2", 10), free={"A": 100})
+    grants, options = C.decide([yard_req("S1", 10), yard_req("S2", 10)], st)
+    assert options == [] and by_call(grants)["S2"].granted == 10 and C.OFFER_FORECAST_WRITE_OFFS is False
+
+
+def test_impossible_ships_are_still_refused_with_write_offs_off(monkeypatch):
+    monkeypatch.setattr(C, "_forecast", lambda st: ({"S2": 0}, FakeBound(["S2"], impossible=["S2"])))
+    st = world([ship("S2")], boxes("S2", 10), free={"A": 100})
+    assert C.decide([yard_req("S2", 10)], st)[0][0].status == REFUSED
 
 
 def test_write_off_is_a_judgement_offered_once_with_serve_all_as_option_0(monkeypatch):
@@ -149,6 +163,21 @@ def test_write_off_is_a_judgement_offered_once_with_serve_all_as_option_0(monkey
     C.chosen(options[0].id)
     grants, options = C.decide([yard_req("S1", 10), yard_req("S2", 10)], st)
     assert options == [] and by_call(grants)["S2"].granted == 10
+
+
+def test_provisional_answer_with_options_pending_is_not_written_to_the_transcript(tmp_path, monkeypatch):
+    st = judged(monkeypatch)
+    runlog.start(tmp_path)
+    try:
+        _, options = C.decide([yard_req("S2", 10)], st)
+        log = tmp_path / "negotiation.jsonl"
+        assert options and (not log.exists() or not log.read_text(encoding="utf-8").strip())
+        C.chosen(C.OPT_FORECAST)
+        C.decide([yard_req("S2", 10)], st)
+    finally:
+        runlog.stop()
+    lines = [json.loads(x) for x in (tmp_path / "negotiation.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [(x["kind"], x["status"]) for x in lines] == [("request", None), ("grant", REFUSED)]
 
 
 def test_supervisor_can_pick_the_forecast_and_the_ship_is_then_refused(monkeypatch):

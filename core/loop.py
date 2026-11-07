@@ -10,7 +10,7 @@ Every tick:
   4. coordinator            coordinator.decide(requests, state) -> (grants, options)   (CORE-5)
                             Grants are binding: every agent with a `grants` attribute gets
                             {(resource, call_id): granted} and proposes again within them.
-  5. supervisor             llm.supervisor.decide(event, options) -> (option_id, sentence)  (LLM-4, once it exists)
+  5. supervisor             llm.supervisor.decide(event, options, state=) -> (option_id, sentence)  (LLM-4)
   6. execute                core.executor: guard -> simulator -> log -> re-read
   7. invariant monitor      core.invariants.check_state(state) -> breaches   (SAFE-2, once it exists)
   8. advance the clock      5 min while a ship is arriving or a crane is idle, else 15 min
@@ -109,8 +109,10 @@ class Loop:
         return by_agent, requests, False
 
     def _coordinate(self, state, events, requests, by_agent) -> list[Action]:
-        """CORE-5 coordinator and LLM-4 supervisor. Hands each agent its grants and lets the
-        agents that take grants propose again within them (updates `by_agent` in place).
+        """CORE-5 coordinator and LLM-4 supervisor. When the coordinator offers options, the
+        supervisor picks first and the coordinator decides again with that pick, so the pick
+        shapes this round's grants. Then each agent gets its grants and the agents that take
+        grants propose again within them (updates `by_agent` in place).
         Returns extra actions to run (the chosen option's)."""
         if not requests:
             return []
@@ -118,6 +120,13 @@ class Loop:
         if coord is None:
             return []
         grants, options = coord.decide(requests, state)
+        extra: list[Action] = []
+        if options:
+            pick = self._supervise(state, events, options)
+            if hasattr(coord, "chosen"):
+                coord.chosen(pick.id)
+                grants, _ = coord.decide(requests, state)      # grants with the pick applied
+            extra = list(pick.actions)
         bound: dict = {}
         for g in grants:
             r = g.request
@@ -137,20 +146,24 @@ class Loop:
             except Exception as e:                          # act on nothing rather than unchecked
                 self._agent_failed(state, a, e, "its actions are dropped this round")
                 by_agent[i] = (a, [])
-        if not options:
-            return []
+        return extra
+
+    def _supervise(self, state, events, options):
+        """LLM-4 picks one option (option 0 if it is missing or fails); logged with who chose."""
         chosen, sentence = options[0].id, options[0].template
         sup = _optional("llm.supervisor")
         if sup is not None:
             try:
-                chosen, sentence = sup.decide(events[0] if events else None, options)
+                chosen, sentence = sup.decide(events[0] if events else None, options, state=state)
             except Exception as e:
                 self._note(state, "supervisor", "exception", f"{type(e).__name__}: {e}"[:200] + "; using option 0.")
         pick = next((o for o in options if o.id == chosen), options[0])
-        self._note(state, "supervisor", f"option:{pick.id}", sentence, {"options": [o.id for o in options]})
-        if hasattr(coord, "chosen"):
-            coord.chosen(pick.id)
-        return list(pick.actions)
+        if pick.id != chosen:
+            sentence = pick.template
+        backend = getattr(sup, "last_backend", lambda: "rules")() if sup is not None else "rules"
+        self._note(state, "supervisor", f"option:{pick.id}", sentence,
+                   {"options": [o.id for o in options], "backend": backend})
+        return pick
 
     def _invariants(self, state) -> None:
         inv = _optional("core.invariants")

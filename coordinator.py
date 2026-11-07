@@ -17,8 +17,9 @@ Yard slots (the bottleneck):
      The yard agent fills it in the same order, so a grant is exactly what it can place.
 Trucks, cranes, berths: what is free right now, highest priority first, then arrival order.
 
-When YARD-3 writes off a ship that is not impossible (a judgement call: give up one ship so
-others finish), the coordinator offers the supervisor two Options: keep serving every ship
+Forecast write-offs are switched off for now (OFFER_FORECAST_WRITE_OFFS, see below): every
+ship that is not impossible is served. When switched on: when YARD-3 writes off a ship that is
+not impossible (a judgement call: give up one ship so others finish), the coordinator offers the supervisor two Options: keep serving every ship
 first-come-first-served (option 0, the safe default: no ship is given up on a forecast) or
 follow the forecast. Until the supervisor picks the forecast, every such ship is served. The
 pick comes back through `chosen(option_id)` and holds until the set of written-off ships
@@ -43,6 +44,11 @@ from core.types import (BLOCK_EMPTY, BLOCK_IMDG, BLOCK_REEFER, BLOCK_STANDARD, C
 
 OPT_FORECAST = "follow_forecast"
 OPT_FCFS = "serve_all"
+# Forecast write-offs of ships that are not impossible are switched off: on practice_03 the
+# forecast wrote off P03-003 on arrival and reversed itself 7.5 h later; following it (as the
+# LLM supervisor does, since it predicts more departures) raised honest turnaround 34.18 -> 36.4 h.
+# Turn back on when the YARD-3 forecast is more reliable. Impossible ships are always refused.
+OFFER_FORECAST_WRITE_OFFS = False
 
 
 class _Memory:
@@ -120,7 +126,9 @@ def _yard(reqs: list[Request], state: WorldState, order: dict) -> tuple[list[Gra
     written_off = frozenset(bnd.written_off) if bnd else frozenset()
     judged = written_off - frozenset(bnd.impossible if bnd else ())
     serve_all = False
-    if judged:
+    if judged and not OFFER_FORECAST_WRITE_OFFS:
+        serve_all = True                          # forecast write-offs off: serve them (see above)
+    elif judged:
         pick = _mem.choice.get(written_off)
         serve_all = pick != OPT_FORECAST
         if pick is None:
@@ -239,7 +247,8 @@ def decide(requests: list[Request], state: WorldState) -> tuple[list[Grant], lis
         else:
             g = [Grant(r, 0, REFUSED, f"Unknown resource {str(res)[:20]!r}.") for r in reqs]
         grants += g
-    _transcript(grants)
+    if not options:                       # with options pending the loop decides again after the pick
+        _transcript(grants)
     return grants, options
 
 

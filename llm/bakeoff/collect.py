@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,43 +29,18 @@ sys.path.insert(0, str(ROOT))
 from agents import admission  # noqa: E402
 from core.loop import Loop  # noqa: E402
 from core.state import build_state  # noqa: E402
-from core.types import SHIP_ARRIVED, SHIP_BERTHED, SHIP_EXPECTED, SHIP_WORKING  # noqa: E402
+from core.types import SHIP_ARRIVED, SHIP_BERTHED, SHIP_WORKING  # noqa: E402
 from llm import client as llm_client  # noqa: E402
-from llm.client import untrusted  # noqa: E402
+from llm.supervisor import summary  # noqa: E402,F401  (the supervisor's own terminal summary)
 
 PRACTICE = [f"practice_0{i}" for i in range(1, 6)]
 DEFAULT_OUT = Path(__file__).resolve().parent / "data" / "decision_points.jsonl"   # git-ignored: workbook data
 TARGET = 50
-WINDOW_DAYS = 5
 RATE = admission.CRANE_RATE * admission.DEFAULT_CRANES       # moves/h for one berthed ship
-
-
-def _clock(state) -> str:
-    """'Day 2 06:15': day 1 is the first day of the 5-day window."""
-    start = state.scenario_end - timedelta(days=WINDOW_DAYS)
-    return f"Day {(state.now - start).days + 1} {state.now:%H:%M}"
 
 
 def _unplaced(state, call_id) -> int:
     return sum(1 for c in state.manifests.get(call_id, ()) if c.direction == "import" and not c.yard_block)
-
-
-def summary(state) -> dict:
-    """Compact, prompt-ready view of the terminal. Vessel names are untrusted and capped."""
-    free = {"imdg": 0, "reefer": 0, "dry": 0}
-    for b in state.blocks:
-        free[admission._group_of_block(b.block_type)] += b.free
-    ships = []
-    for s in state.ships:
-        if s.status not in (SHIP_EXPECTED, SHIP_ARRIVED, SHIP_BERTHED, SHIP_WORKING):
-            continue
-        waited = round((state.now - s.actual_arrival).total_seconds() / 3600, 1) if s.actual_arrival else None
-        ships.append({"call_id": s.call_id, "vessel": untrusted(s.vessel), "status": s.status, "berth": s.berth,
-                      "waiting_h": waited if s.status == SHIP_ARRIVED else None,
-                      "moves_left": s.remaining_moves, "imports_without_slot": _unplaced(state, s.call_id)})
-    busy = {s.berth for s in state.ships if s.berth and s.status in (SHIP_BERTHED, SHIP_WORKING, "sailing")}
-    return {"time": _clock(state), "hours_left_in_window": round((state.scenario_end - state.now).total_seconds() / 3600, 1),
-            "ships": ships, "yard_free_slots": free, "free_berths": [b.berth_id for b in state.berths if b.berth_id not in busy]}
 
 
 def berth_point(state) -> dict | None:
