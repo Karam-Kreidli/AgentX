@@ -11,6 +11,8 @@ For every action:
   4. log one line in decisions.jsonl (who, what, why, guard result, tool result)
   5. re-read the state, and check the simulator now shows what we did; if not,
      the simulator is believed and the mismatch is logged as an anomaly
+     (also after an error reply: a reply can be lost although the simulator did the
+     work, SAFE-4; then it is logged as "lost_ack" and nobody re-sends it)
 
 Agents never import this module or the toolkit: they return Actions, the loop
 hands them here.
@@ -28,6 +30,9 @@ from core.types import (TOOL_ASSIGN_BERTH, TOOL_DISPATCH_TRUCKS, TOOL_PLACE, TOO
 
 __all__ = ["DecisionLog", "Executor"]
 
+# Tools whose effect _mismatch can confirm (release_to_consignee can't be seen in the snapshot).
+_VERIFIABLE = (TOOL_ASSIGN_BERTH, TOOL_PLAN_CRANES, TOOL_DISPATCH_TRUCKS, TOOL_PLACE)
+
 
 class Executor:
     def __init__(self, api: Any, run_dir: Path, log: Optional[DecisionLog] = None):
@@ -38,6 +43,7 @@ class Executor:
         self.sent = 0
         self.refused = 0
         self.mismatches = 0
+        self.lost_acks = 0
 
     # ------------------------------------------------------------------
     def execute(self, action: Action, state: WorldState, backend: str = "rules",
@@ -65,15 +71,19 @@ class Executor:
                                 guard_reason=why, tool_result=result if isinstance(result, dict) else {"result": result},
                                 backend=backend))
         if isinstance(result, dict) and "error" in result:
-            self.state = state
+            # The reply may be lost although the simulator did it (SAFE-4). Re-read and believe
+            # the simulator; otherwise the cached manifest says "not placed" and the boxes get
+            # placed again, into another block (yard counts drift, F2).
+            new = self._reread(tool, args, state)
+            if tool in _VERIFIABLE and self._mismatch(tool, args, new) is None:
+                self.lost_acks += 1
+                self.log.note(self.tick, new, "executor", "lost_ack",
+                              f"{tool} answered with an error, but the simulator shows it was done; "
+                              "trusting the simulator.", {"args": args, "error": str(result["error"])[:200]})
+            self.state = new
             return result
 
-        # Read-after-write.
-        if tool == TOOL_PLACE:
-            for call_id in {c.call_id for rows in state.manifests.values() for c in rows
-                            if c.container_id in set(args.get("container_ids", ()))}:
-                invalidate(self.api, call_id)
-        new = build_state(self.api)
+        new = self._reread(tool, args, state)
         problem = self._mismatch(tool, args, new)
         if problem:
             self.mismatches += 1
@@ -84,6 +94,20 @@ class Executor:
         return result
 
     # ------------------------------------------------------------------
+    def _reread(self, tool: str, args: dict, state: WorldState) -> WorldState:
+        """Read-after-write. Placed boxes' manifests are re-read, not taken from the cache.
+        A read that fails here keeps the last good value; it is logged, not silent (SAFE-4)."""
+        if tool == TOOL_PLACE:
+            for call_id in {c.call_id for rows in state.manifests.values() for c in rows
+                            if c.container_id in set(args.get("container_ids", ()))}:
+                invalidate(self.api, call_id)
+        new = build_state(self.api)
+        for a in new.anomalies:
+            if a not in state.anomalies:
+                self.log.note(self.tick, new, "state", "anomaly",
+                              f"Re-read after {tool}: {a}. Logged; the run carries on.")
+        return new
+
     @staticmethod
     def _mismatch(tool: str, args: dict, s: WorldState) -> Optional[str]:
         if tool == TOOL_ASSIGN_BERTH:
