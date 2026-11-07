@@ -215,9 +215,21 @@ def _pool(reqs: list[Request], free: int, what: str, order: dict) -> list[Grant]
     return grants
 
 
-def _free_berths(state: WorldState) -> int:
-    used = {s.berth for s in state.ships if s.berth}
-    return sum(1 for b in state.berths if b.berth_id not in used)
+def _berths(reqs: list[Request], state: WorldState, order: dict) -> list[Grant]:
+    """One berth per request, only a free berth the ship actually fits (smallest first)."""
+    busy = {s.berth for s in state.ships if s.berth and s.status in ("berthed", "working", "sailing")}
+    free = sorted((b for b in state.berths if b.berth_id not in busy), key=lambda b: (b.length_m, b.max_draft_m))
+    grants = []
+    for r in sorted(reqs, key=lambda r: (-r.priority, order.get(r.call_id, 1e9), r.call_id)):
+        s = state.ship(r.call_id)
+        fit = next((b for b in free if s is not None and s.loa_m and s.draft_m and b.fits(s.loa_m, s.draft_m)), None)
+        if fit is None:
+            size = f" ({s.loa_m:g} m, draft {s.draft_m:g} m)" if s is not None and s.loa_m and s.draft_m else ""
+            grants.append(Grant(r, 0, REFUSED, f"No free berth fits it{size}; it waits for one to free up."))
+            continue
+        free.remove(fit)
+        grants.append(Grant(r, 1, GRANTED, f"{fit.berth_id} is free and fits it."))
+    return grants
 
 
 # --------------------------------------------------------------------------
@@ -247,7 +259,7 @@ def decide(requests: list[Request], state: WorldState) -> tuple[list[Grant], lis
             g = _pool(reqs, sum(1 for c in state.cranes if c.status == EQ_AVAILABLE and not c.call_id),
                       "cranes", order)
         elif res == RES_BERTH:
-            g = _pool(reqs, _free_berths(state), "berths", order)
+            g = _berths(reqs, state, order)
         else:
             g = [Grant(r, 0, REFUSED, f"Unknown resource {str(res)[:20]!r}.") for r in reqs]
         grants += g

@@ -51,15 +51,15 @@ def b1_busy_b2_b3_free():
 
 # ---------------------------------------------------------------- berth choice
 
-def test_oldest_first_is_option_0_and_least_work_is_offered_when_it_changes_the_outcome():
+def test_berth_agents_plan_is_option_0_and_oldest_first_is_offered_when_it_changes_the_outcome():
     st = world(b1_busy_b2_b3_free())
     opts = O.build(st)
-    assert [o.id for o in opts] == ["oldest_first", "least_work_first"]
-    assert opts[0].actions[0].args == {"call_id": "OLD", "berth_id": "B1"}
-    assert opts[1].actions[0].args == {"call_id": "SHORT", "berth_id": "B1"}
+    assert [o.id for o in opts] == ["berth_agent_plan", "oldest_first"]
+    assert opts[0].actions[0].args == {"call_id": "SHORT", "berth_id": "B1"}      # BERTH-2: least work first
+    assert opts[1].actions[0].args == {"call_id": "OLD", "berth_id": "B1"}
     a, b = opts[0].predicted, opts[1].predicted
-    assert a["avg_finish_h"] - b["avg_finish_h"] >= O.MIN_GAIN_H
-    assert set(a["finish_h"]) == {"OLD", "SHORT"} and a["waited_h"] == 8.0
+    assert b["avg_finish_h"] - a["avg_finish_h"] >= O.MIN_GAIN_H
+    assert set(a["finish_h"]) == {"OLD", "SHORT"} and b["waited_h"] == 8.0
     for o in opts:
         assert o.template and "yard space not modelled" in o.template
 
@@ -101,7 +101,8 @@ def only_fits_world():
 def test_ship_that_fits_only_this_berth_is_offered():
     st = only_fits_world()
     opts = O.build(st)
-    assert opts and opts[0].predicted["ship"] == "SMALL"
+    assert opts and opts[0].predicted["ship"] == "MID"
+    assert [o.id for o in opts] == ["berth_agent_plan", "oldest_first", "only_fits_here"]
     assert "only_fits_here" in [o.id for o in opts] and all(O.rule_safe(o, st)[0] for o in opts)
 
 
@@ -114,7 +115,7 @@ def test_an_option_the_guard_refuses_is_dropped_and_option_0_refused_means_none(
     assert O.build(st) == []                             # only one safe option left: no choice to make
     three = only_fits_world()
     assert len(O.build(three)) >= 2
-    monkeypatch.setattr(guard, "check", lambda a, s: (False, "test") if a.args["call_id"] == "SMALL" else real(a, s))
+    monkeypatch.setattr(guard, "check", lambda a, s: (False, "test") if a.args["call_id"] == "MID" else real(a, s))
     assert O.build(three) == []                          # option 0 refused: never offer only the others
 
 
@@ -193,20 +194,20 @@ def test_coordinator_returns_berth_options_and_still_writes_the_transcript(tmp_p
         grants, opts = C.decide([Request("trucks", "trucks", 1, "OLD", 1.0, "x")], st)
     finally:
         runlog.stop()
-    assert [o.id for o in opts] == ["oldest_first", "least_work_first"]
+    assert [o.id for o in opts] == ["berth_agent_plan", "oldest_first"]
     assert (tmp_path / "negotiation.jsonl").read_text(encoding="utf-8").strip()
 
 
 def test_loop_runs_the_chosen_option_first_and_drops_conflicting_agent_actions(tmp_path, monkeypatch):
     from core.loop import Loop, _conflicts
     from tests.test_executor import FakeAPI
-    pick = Option("least_work_first", (Action("assign_berth", {"call_id": "C1", "berth_id": "B2"}, "options", "pick"),),
+    pick = Option("oldest_first", (Action("assign_berth", {"call_id": "C1", "berth_id": "B2"}, "options", "pick"),),
                   {}, "t")
     coord = types.ModuleType("coordinator")
-    coord.decide = lambda reqs, st: ([], [Option("oldest_first", (), {}, "t0"), pick])
+    coord.decide = lambda reqs, st: ([], [Option("berth_agent_plan", (), {}, "t0"), pick])
     monkeypatch.setitem(sys.modules, "coordinator", coord)
     sup = types.ModuleType("llm.supervisor")
-    sup.decide = lambda ev, opts, state=None: ("least_work_first", "because")
+    sup.decide = lambda ev, opts, state=None: ("oldest_first", "because")
     monkeypatch.setitem(sys.modules, "llm.supervisor", sup)
 
     class Agent:
@@ -224,7 +225,7 @@ def test_loop_runs_the_chosen_option_first_and_drops_conflicting_agent_actions(t
 
 
 @needs_workbook
-def test_practice_runs_are_unchanged_and_violation_free(tmp_path):
+def test_practice_run_is_violation_free(tmp_path):
     import run
     s = run.run_one("practice_03", WORKBOOK, None, tmp_path, "multi")
-    assert s["honest_turnaround_h"] == 34.18 and len(s["unfinished_calls"]) == 2
+    assert s["violations"] == [] and len(s["unfinished_calls"]) == 2

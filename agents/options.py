@@ -19,9 +19,9 @@ Rules every option follows:
     (LLM-1: models took metric-gaming bait, so the code never offers it).
 
 Berth choice (on): a berth is free and more arrived ships fit it than there are free berths
-for them. Option 0 = the oldest arrival (BERTH-1's rule); alternatives = the ship with the
-least work left, and a ship that fits only this berth. Predicted effects come from a small
-crane-time model (FIXED_CRANES cranes at CRANE_RATE moves/h each, berths freeing as ships
+for them. Option 0 = the berth agent's own choice (BERTH-2: least work first, best fit);
+alternatives = the oldest arrival, and a ship that fits only this berth. Predicted effects
+come from a small crane-time model (FIXED_CRANES cranes at CRANE_RATE moves/h each, berths freeing as ships
 finish); yard space is not modelled, and the template says so.
 
 Crane choice (off until CRANE-2, CRANE_OPTIONS = False): a ship at berth has cranes but can't
@@ -110,7 +110,7 @@ def _berth_free_at(state: WorldState) -> dict[str, float]:
 
 def _predict(state: WorldState, first, berth_id: str, waiting: list) -> dict:
     """Finish times (hours from now) of the waiting ships if `first` takes `berth_id` now and
-    the rest follow in arrival order onto whichever berth they fit frees first."""
+    the rest follow in the berth agent's order onto whichever berth they fit frees first."""
     free = _berth_free_at(state)
     finish = {}
     free[berth_id] = _work_h(first)
@@ -146,28 +146,29 @@ def _berth_option(state, oid, ship, b, waiting, why) -> Option:
 
 
 def berth_options(state: WorldState) -> list[Option]:
+    from agents import berth as berth_agent
     occupied = {s.berth for s in state.ships if s.berth and s.status in BUSY}
-    waiting = sorted((s for s in state.ships if s.status == SHIP_ARRIVED and s.actual_arrival
-                      and s.loa_m and s.draft_m and s.loa_m > 0 and s.draft_m > 0),
-                     key=lambda s: (s.actual_arrival, s.call_id))
+    waiting = berth_agent.rank(state, [s for s in state.ships if s.status == SHIP_ARRIVED and s.actual_arrival
+                                       and s.loa_m and s.draft_m and s.loa_m > 0 and s.draft_m > 0])
     free = [b for b in state.berths if b.berth_id not in occupied]
+    planned = {b.berth_id: (s, why) for s, b, why in berth_agent.plan(state)}
     for b in free:
         fit = [s for s in waiting if b.fits(s.loa_m, s.draft_m)]
-        if len(fit) < 2:
+        if len(fit) < 2 or b.berth_id not in planned:
             continue
         # Competition: more ships want this berth than there are free berths they could take.
         room = {x.berth_id for s in fit for x in free if x.fits(s.loa_m, s.draft_m)}
         if len(fit) <= len(room):
             continue
-        base = _berth_option(state, "oldest_first", fit[0], b, waiting,
-                             "it arrived first; same rule as the berth agent")
+        ship, why = planned[b.berth_id]
+        base = _berth_option(state, "berth_agent_plan", ship, b, waiting,
+                             f"the berth agent's choice: least work first, {why}")
         alts = []
-        short = min(fit, key=lambda s: (s.remaining_moves, s.actual_arrival))
-        if short.call_id != fit[0].call_id:
-            alts.append(_berth_option(state, "least_work_first", short, b, waiting,
-                                      f"it has the least work left, {short.remaining_moves} moves"))
+        oldest = min(fit, key=lambda s: (s.actual_arrival, s.call_id))
+        if oldest.call_id != ship.call_id:
+            alts.append(_berth_option(state, "oldest_first", oldest, b, waiting, "it arrived first"))
         only = [s for s in fit if [x.berth_id for x in state.berths if x.fits(s.loa_m, s.draft_m)] == [b.berth_id]]
-        if only and only[0].call_id not in {fit[0].call_id, short.call_id}:
+        if only and only[0].call_id not in {ship.call_id, oldest.call_id}:
             alts.append(_berth_option(state, "only_fits_here", only[0], b, waiting,
                                       f"it fits no berth but {b.berth_id}"))
         alts = [o for o in alts if _real_gain(o, base)]
