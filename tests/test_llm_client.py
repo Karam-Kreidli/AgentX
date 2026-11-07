@@ -80,6 +80,17 @@ def test_vllm_request_uses_structured_outputs_and_no_thinking():
     assert headers["authorization"] == f"Bearer {KEY_LOCAL}"
 
 
+@pytest.mark.parametrize("served", ["gptoss", "gpt-oss-20b", "openai/gpt-oss-120b"])
+def test_gpt_oss_gets_low_reasoning_and_room_for_it_under_any_served_name(served):
+    fake = Fake(local=[reply(GOOD)])
+    c = LLMClient([Backend("local", "http://local.test/v1", KEY_LOCAL, served, "vllm")],
+                  transport=httpx.MockTransport(fake), sleep=lambda s: None)
+    c.ask("supervisor", {}, SCHEMA)
+    _, body, _ = fake.requests[0]
+    assert body["reasoning_effort"] == "low" and "chat_template_kwargs" not in body
+    assert body["max_tokens"] >= 800
+
+
 def test_groq_request_uses_json_mode_and_schema_in_prompt():
     fake = Fake(local=[httpx.ConnectError("off")], groq=[reply(GOOD)])
     c = make(fake)
