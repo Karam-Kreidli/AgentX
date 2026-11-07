@@ -61,6 +61,18 @@ FIRST_SNAPSHOT_TRIES = 5      # SAFE-4: a failed first read is retried, not take
 _FAULT_COUNTS = {safety.EXCEPTION: "exceptions", safety.TIMEOUT: "timeouts", safety.GARBAGE: "garbage"}
 
 
+def _conflicts(a: Action, b: Action) -> bool:
+    """Do two actions of the same tool touch the same ship, berth or cranes?"""
+    if a.tool != b.tool:
+        return False
+    x, y = a.args or {}, b.args or {}
+    if x.get("call_id") is not None and x.get("call_id") == y.get("call_id"):
+        return True
+    if x.get("berth_id") is not None and x.get("berth_id") == y.get("berth_id"):
+        return True
+    return bool(set(x.get("crane_ids") or ()) & set(y.get("crane_ids") or ()))
+
+
 def _optional(module: str):
     """A module another task builds, or None until it exists."""
     if module in sys.modules:
@@ -202,8 +214,6 @@ class Loop:
         Returns extra actions to run (the chosen option's).
         SAFE-4: every call runs guarded. If the coordinator fails, its round adds nothing and
         the agents keep their first proposals (no grants applied)."""
-        if not requests:
-            return []
         coord = _optional("coordinator")
         if coord is None:
             return []
@@ -328,7 +338,10 @@ class Loop:
                 except Exception as e:
                     self.counts["exceptions"] += 1
                     self._note(state, "coordinator", "exception", f"{type(e).__name__}: {e}"[:200])
-            actions = [a for _, acts in by_agent for a in acts] + extra
+            # The chosen option runs first; agent actions of the same kind on the same ship, berth or cranes
+            # are dropped (option 0 is the agents' own plan, so nothing is lost when it is picked).
+            own = [a for _, acts in by_agent for a in acts]
+            actions = extra + [a for a in own if not any(_conflicts(a, x) for x in extra)]
             self._drain_escalations(state, agents)
             if not actions:
                 break
