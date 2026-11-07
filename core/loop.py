@@ -7,8 +7,10 @@ Every tick:
   1. build state            core.state.build_state            (CORE-3)
   2. detect events          core.events.detect_events         (CORE-3)
   3. agents propose         each agent's propose(state, events) -> (actions, requests)
-  4. coordinator            coordinator.decide(requests, state) -> (grants, options)   (CORE-5, once it exists)
-  5. supervisor             llm.supervisor.decide(event, options) -> (option_id, sentence)  (LLM-4, once it exists)
+  4. coordinator            coordinator.decide(requests, state) -> (grants, options)   (CORE-5)
+                            Grants are binding: every agent with a `grants` attribute gets
+                            {(resource, call_id): granted} and proposes again within them.
+  5. supervisor             llm.supervisor.decide(event, options, state=) -> (option_id, sentence)  (LLM-4)
   6. execute                core.executor: guard -> simulator -> log -> re-read
   7. invariant monitor      core.invariants.check_state(state) -> breaches   (SAFE-2, once it exists)
   8. advance the clock      5 min while a ship is arriving or a crane is idle, else 15 min
@@ -22,7 +24,9 @@ Safety:
     also gets its cranes, trucks and yard slots this tick.
   - SAFE-4 (core/safety.py): agents, coordinator, supervisor and event detection run with
     a hard timeout on a worker thread; a call that hangs, raises or returns garbage is
-    logged and that tick runs rules-only. Simulator calls stay on this thread.
+    logged and that tick runs rules-only. A timed-out agent is used again only if its call
+    finishes on its own; if its thread has to be stopped, it is benched for the rest of the
+    run. Simulator calls stay on this thread.
   - Clock guard: if advance_time doesn't move the clock, retry with smaller steps; after
     safety.CLOCK_ATTEMPTS (6) failures stop cleanly. Run budget: at 70 % of RUN_BUDGET_S the
     LLM is switched off, at 100 % the rest of the run is rules-only. summary.json is always written.
@@ -69,7 +73,8 @@ def _optional(module: str):
 class Loop:
     def __init__(self, api: Any, run_dir: Path, agents: Optional[list] = None,
                  tick_budget_s: float = TICK_BUDGET_S, max_ticks: int = 100_000,
-                 call_timeout_s: Optional[float] = None, run_budget_s: Optional[float] = None):
+                 call_timeout_s: Optional[float] = None, run_budget_s: Optional[float] = None,
+                 kill_after_s: Optional[float] = None):
         self.api = api
         self.run_dir = Path(run_dir)
         self.log = DecisionLog(self.run_dir)
@@ -82,26 +87,34 @@ class Loop:
         self.prev: Optional[WorldState] = None
         self.rules_only_next = False
         self.counts = {"exceptions": 0, "watchdog": 0, "breaches": 0, "rules_only_ticks": 0,
-                       "timeouts": 0, "garbage": 0, "busy_ticks": 0, "clock_retries": 0}
+                       "timeouts": 0, "garbage": 0, "busy_ticks": 0, "clock_retries": 0, "killed": 0}
+        self._grant_seen: dict = {}          # (agent, resource, call_id) -> last grant status noted
         # SAFE-4
-        self.calls = safety.Guarded()
+        self.calls = safety.Guarded(kill_after_s=kill_after_s)
         self.call_timeout_s = call_timeout_s or safety.call_timeout_s()
         self.budget = safety.RunBudget(run_budget_s)
         self.phase = safety.FULL
         self.llm_prev: Optional[bool] = None
         self.llm_switched = False
         self.stopped: Optional[str] = None       # why the run ended early, if it did
+        self.clock_now = None                    # simulator time after the last successful advance
 
     # ------------------------------------------------------------------ helpers
     def _note(self, state, agent, choice, reason, saw=None):
         self.log.note(self.tick, state, agent, choice, reason, saw)
 
-    def _call(self, state, key, label, fn, *args, timeout_s=None, default=None, check=None):
-        """SAFE-4: run decision code with a hard timeout (see core/safety.py)."""
+    def _call(self, at, key, label, fn, *args, timeout_s=None, default=None, check=None, **kwargs):
+        """SAFE-4: run decision code with a hard timeout (see core/safety.py). `at` is the state
+        the log lines refer to (not named `state`, so fn may take a `state=` keyword)."""
         out = self.calls.call(key, label, fn, *args, timeout_s=timeout_s or self.call_timeout_s,
-                              default=default, check=check)
+                              default=default, check=check, **kwargs)
         if out.back:
-            self._note(state, "loop", "recovered", f"{label} finished its earlier call; it is used again.")
+            self._note(at, "loop", "recovered", f"{label} finished its earlier call on its own; "
+                       "it is used again.")
+        if out.killed:
+            self.counts["killed"] += 1
+            self._note(at, "loop", "killed", f"{label} was still running {out.error}; its thread was "
+                       "stopped and it is benched for the rest of the run (its state may be half-updated).")
         return out
 
     def _fault(self, state, agent, out: safety.Outcome, consequence: str) -> None:
@@ -145,19 +158,19 @@ class Loop:
         self._fault(state, "rules", out, "no actions this tick.")
         return []
 
-    def _propose(self, state, events, agents) -> tuple[list[Action], list, bool]:
-        """Collect actions and requests. Returns (actions, requests, fell_back)."""
-        actions, requests = [], []
+    def _propose(self, state, events, agents) -> tuple[list[tuple[Any, list[Action]]], list, bool]:
+        """Collect actions (per agent, in order) and requests. Returns (by_agent, requests, fell_back)."""
+        by_agent, requests = [], []
         for a in agents:
             name = getattr(a, "name", "agent")
             out = self._call(state, id(a), f"{name}.propose", a.propose, state, events, check=safety.proposal)
             if not out.ok:
                 self._fault(state, name, out, "this tick runs rules-only.")
-                return self._rules_fallback(state, events, a), [], True
+                return [(self.rules, self._rules_fallback(state, events, a))], [], True
             acts, reqs = out.value
-            actions += acts
+            by_agent.append((a, acts))
             requests += reqs
-        return actions, requests, False
+        return by_agent, requests, False
 
     def _reread(self, before: WorldState) -> WorldState:
         """A fresh snapshot mid-tick. Failed reads it adds (vs `before`) are logged, not silent."""
@@ -181,8 +194,14 @@ class Loop:
                 self._note(state, "state", "anomaly", f"Data anomaly ({e.subject}): {msg}. Logged; the run carries on.")
         return events
 
-    def _coordinate(self, state, events, requests) -> list[Action]:
-        """CORE-5 coordinator and LLM-4 supervisor, once they exist. Returns extra actions to run."""
+    def _coordinate(self, state, events, requests, by_agent) -> list[Action]:
+        """CORE-5 coordinator and LLM-4 supervisor. When the coordinator offers options, the
+        supervisor picks first and the coordinator decides again with that pick, so the pick
+        shapes this round's grants. Then each agent gets its grants and the agents that take
+        grants propose again within them (updates `by_agent` in place).
+        Returns extra actions to run (the chosen option's).
+        SAFE-4: every call runs guarded. If the coordinator fails, its round adds nothing and
+        the agents keep their first proposals (no grants applied)."""
         if not requests:
             return []
         coord = _optional("coordinator")
@@ -194,23 +213,61 @@ class Loop:
             self._fault(state, "coordinator", out, "no coordinator actions this round.")
             return []
         grants, options = out.value
+        extra: list[Action] = []
+        if options:
+            pick = self._supervise(state, events, options)
+            if hasattr(coord, "chosen"):
+                done = self._call(state, "coordinator", "coordinator.chosen", coord.chosen, pick.id)
+                again = self._call(state, "coordinator", "coordinator.decide", coord.decide, requests, state,
+                                   check=safety.coordination) if done.ok else done
+                if again.ok:
+                    grants = again.value[0]                      # grants with the pick applied
+                else:
+                    self._fault(state, "coordinator", again, "the grants from before the pick are used.")
+            extra = list(pick.actions)
+        bound: dict = {}
         for g in grants:
-            self._note(state, "coordinator", f"grant:{g.status}", g.reason,
-                       {"request": g.request, "granted": g.granted})
-        if not options:
-            return []
+            r = g.request
+            bound.setdefault(r.agent, {})[(r.resource, r.call_id)] = g.granted
+            key = (r.agent, r.resource, r.call_id)
+            if self._grant_seen.get(key) != g.status:          # decisions.jsonl: changes only
+                self._grant_seen[key] = g.status
+                self._note(state, "coordinator", f"grant:{g.status}", g.reason,
+                           {"request": r, "granted": g.granted})
+        for i, (a, _) in enumerate(by_agent):
+            if not hasattr(a, "grants"):
+                continue
+            a.grants = bound.get(getattr(a, "name", None), {})
+            name = getattr(a, "name", "agent")
+            out = self._call(state, id(a), f"{name}.propose", a.propose, state, events, check=safety.proposal)
+            if out.ok:
+                by_agent[i] = (a, out.value[0])
+            else:                                           # act on nothing rather than unchecked
+                self._fault(state, name, out, "its actions are dropped this round.")
+                by_agent[i] = (a, [])
+        return extra
+
+    def _supervise(self, state, events, options):
+        """LLM-4 picks one option (option 0 if it is missing or fails); logged with who chose."""
         chosen, sentence = options[0].id, options[0].template
         sup = _optional("llm.supervisor")
         if sup is not None:
             out = self._call(state, "supervisor", "supervisor.decide", sup.decide,
-                             events[0] if events else None, options, check=safety.choice)
+                             events[0] if events else None, options, check=safety.choice, state=state)
             if out.ok:
                 chosen, sentence = out.value
             else:
                 self._fault(state, "supervisor", out, "using option 0.")
         pick = next((o for o in options if o.id == chosen), options[0])
-        self._note(state, "supervisor", f"option:{pick.id}", sentence, {"options": [o.id for o in options]})
-        return list(pick.actions)
+        if pick.id != chosen:
+            sentence = pick.template
+        try:
+            backend = getattr(sup, "last_backend", lambda: "rules")() if sup is not None else "rules"
+        except Exception:
+            backend = "rules"
+        self._note(state, "supervisor", f"option:{pick.id}", sentence,
+                   {"options": [o.id for o in options], "backend": backend})
+        return pick
 
     def _invariants(self, state) -> None:
         inv = _optional("core.invariants")
@@ -258,17 +315,20 @@ class Loop:
 
         for rnd in range(MAX_ROUNDS):
             agents = [self.rules] if rules_only else self.agents
-            actions, requests, fell_back = self._propose(state, events if rnd == 0 else [], agents)
+            evs = events if rnd == 0 else []
+            by_agent, requests, fell_back = self._propose(state, evs, agents)
             rules_only = rules_only or fell_back
             if not rules_only and time.perf_counter() - t0 > self.tick_budget_s:
                 rules_only = self._watchdog(state)
-                actions, requests = self._rules_fallback(state, events if rnd == 0 else []), []
+                by_agent, requests = [(self.rules, self._rules_fallback(state, evs))], []
+            extra: list[Action] = []
             if not rules_only:
                 try:
-                    actions += self._coordinate(state, events if rnd == 0 else [], requests)
+                    extra = self._coordinate(state, evs, requests, by_agent)
                 except Exception as e:
                     self.counts["exceptions"] += 1
                     self._note(state, "coordinator", "exception", f"{type(e).__name__}: {e}"[:200])
+            actions = [a for _, acts in by_agent for a in acts] + extra
             self._drain_escalations(state, agents)
             if not actions:
                 break
@@ -301,6 +361,10 @@ class Loop:
         finally:
             if self.llm_switched:
                 safety.llm_restore(self.llm_prev)   # the next scenario starts with the LLM as configured
+            for label in self.calls.shutdown():     # no spinning thread may slow the next scenario
+                self.counts["killed"] += 1
+                self._note(self.prev, "loop", "killed", f"{label} was still running at the end of the run; "
+                           "its thread was stopped.")
         return self.summary()
 
     def _run(self) -> None:
@@ -309,7 +373,6 @@ class Loop:
             self._budget()
             try:
                 state = self.step()
-                est_now = state.now
             except Exception as e:            # never crash: log, then keep the clock moving
                 self.counts["exceptions"] += 1
                 state = self.prev
@@ -324,9 +387,12 @@ class Loop:
                                "stopping the run cleanly.")
                     return
                 continue
-            if state.now >= state.scenario_end:
+            # A failed snapshot leaves `state` (and a failed clock read leaves state.now) at an old
+            # time, so also use the simulator's own answer to the last advance (PR #11's rule).
+            now = max(state.now, self.clock_now or state.now)
+            if now >= state.scenario_end:
                 return
-            if not self._advance(state):
+            if not self._advance(state, now):
                 return
             self.tick += 1
 
@@ -346,10 +412,13 @@ class Loop:
         if phase == safety.RULES_ONLY:
             self.rules_only_next = True
 
-    def _advance(self, state: WorldState) -> bool:
-        """Advance the clock and check it moved (SAFE-4). False = stuck: stop the run cleanly."""
+    def _advance(self, state: WorldState, now) -> bool:
+        """Advance the clock from `now` (the latest time we know) and check it moved (SAFE-4).
+        False = stuck: stop the run cleanly."""
         res = safety.advance_clock(lambda m: self.api.call("advance_time", {"minutes": m}),
-                                   lambda: self._reread(state).now, state.now, self._tick_minutes(state))
+                                   lambda: self._reread(state).now, now, self._tick_minutes(state))
+        if res.ok and res.now is not None:
+            self.clock_now = res.now
         for i, p in enumerate(res.problems):
             self.counts["clock_retries"] += 1
             last = not res.ok and i == len(res.problems) - 1
@@ -360,7 +429,7 @@ class Loop:
                        "but the clock did move; carrying on.")
         if not res.ok:
             self.stopped = "clock_stuck"
-            self._note(state, "loop", "CRITICAL", f"The simulator clock is stuck at {state.now:%Y-%m-%d %H:%M} "
+            self._note(state, "loop", "CRITICAL", f"The simulator clock is stuck at {now:%Y-%m-%d %H:%M} "
                        f"after {len(res.problems)} tries; stopping the run cleanly instead of spinning. "
                        "Unfinished ships stay unfinished.")
             return False
@@ -376,14 +445,21 @@ class Loop:
                  "summary_error": f"run_summary failed: {type(e).__name__}: {e}"[:200]}
         try:
             st = build_state(self.api)
-            honest = [((v.departed_at or st.scenario_end) - v.actual_arrival).total_seconds() / 3600
-                      for v in st.ships if v.actual_arrival]
-            s["honest_turnaround_h"] = round(sum(honest) / len(honest), 2) if honest else None
-            s["unfinished_calls"] = [v.call_id for v in st.ships if v.status != SHIP_DEPARTED]
-            if st.anomalies:
-                s["final_state_anomalies"] = list(st.anomalies)[:20]
+        except Exception as e:                # last good snapshot, if any (PR #11)
+            st = self.prev
+            msg = f"final state failed: {type(e).__name__}: {e}"[:200]
+            s["summary_error"] = f"{s['summary_error']}; {msg}" if "summary_error" in s else msg
+        s["honest_turnaround_h"], s["unfinished_calls"] = None, []
+        try:
+            if st is not None:
+                honest = [((v.departed_at or st.scenario_end) - v.actual_arrival).total_seconds() / 3600
+                          for v in st.ships if v.actual_arrival]
+                s["honest_turnaround_h"] = round(sum(honest) / len(honest), 2) if honest else None
+                s["unfinished_calls"] = [v.call_id for v in st.ships if v.status != SHIP_DEPARTED]
+                if st.anomalies:
+                    s["final_state_anomalies"] = list(st.anomalies)[:20]
         except Exception as e:
-            s.setdefault("summary_error", f"final state failed: {type(e).__name__}: {e}"[:200])
+            s.setdefault("summary_error", f"honest turnaround failed: {type(e).__name__}"[:200])
         s["skeleton_exceptions"] = self.counts["exceptions"]
         s["loop"] = {**self.counts, "ticks": self.tick, "actions_sent": self.ex.sent,
                      "actions_refused": self.ex.refused, "mismatches": self.ex.mismatches,

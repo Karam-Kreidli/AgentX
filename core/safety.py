@@ -7,9 +7,11 @@
 
     calls = safety.Guarded()                       # one per run
     out = calls.call(key, label, fn, *args, timeout_s=10, default=None, check=None)
-    #   like safe_call, and a caller whose last call timed out is "busy" until that call returns
+    #   like safe_call, and a caller whose last call timed out is "busy" until that call returns;
+    #   if it is still running a grace period later, its thread is stopped and it is benched
+    calls.shutdown()                               # end of run: stop every thread still running
 
-    budget = safety.RunBudget()                    # RUN_BUDGET_S, default 360 s
+    budget = safety.RunBudget()                    # RUN_BUDGET_S, default 300 s
     budget.phase()                                 # full | no_llm (>= 70 %) | rules_only (>= 100 %)
     prev = safety.llm_off(); ...; safety.llm_restore(prev)
 
@@ -20,12 +22,18 @@ Why these, in GROUND_RULES order ("never crash" is rule 2, and a hang is a crash
   the LLM calls inside them) on a daemon thread and waits at most timeout_s. Not a
   ThreadPoolExecutor (its threads block interpreter exit) and not signal.alarm (Unix only,
   main thread only). Any exception, even SystemExit, comes back as data.
-- A call that times out can't be killed outright in Python. safe_call asks the thread to stop
-  (an async exception, delivered at its next bytecode, so a CPU spin stops at once; a thread
-  blocked in sleep or I/O stops when that returns). Until it has stopped, Guarded refuses to
-  call the same caller again, so one agent object never runs on two threads at once. After
-  MAX_TIMEOUTS timeouts the caller is benched for the rest of the run, which caps the wall
-  time a hanging agent can cost.
+- A call that times out keeps running on its thread: Python can't kill a thread cleanly.
+  Guarded never calls the same caller again while it runs, so one agent object never runs on
+  two threads at once. Then, whichever comes first:
+    * the call finishes on its own -> "back": its state is consistent, it is used again;
+    * it is still running KILL_AFTER_S later (a CPU spin or a real hang) -> its thread is
+      stopped (an async exception, delivered at its next bytecode, so a spin stops at once; a
+      thread blocked in sleep or I/O stops when that returns) and the caller is BENCHED for
+      the rest of the run. A thread stopped from outside may leave the agent's state
+      half-updated (its own cleanup is skipped), so a killed agent is never reused.
+  After MAX_TIMEOUTS timeouts a caller is benched too, which caps the wall time a flaky agent
+  can cost. shutdown() stops whatever is still running at the end of a run, so a spinning
+  thread can't slow the next scenario.
 - Simulator calls never go to a worker thread: a thread we gave up on must not be able to
   change the simulator. Agents can't call it anyway (CONTRACTS.md), and the loop and executor
   call it on the main thread. This module never calls the simulator itself.
@@ -35,8 +43,9 @@ Why these, in GROUND_RULES order ("never crash" is rule 2, and a hang is a crash
 - advance_clock: if the clock doesn't move, re-read it (the reply may be lost while the
   clock did move), then retry with smaller steps. After CLOCK_ATTEMPTS failures the caller
   stops the run cleanly instead of spinning through max_ticks.
-- RunBudget: 3 hidden scenarios share 20 minutes, so each gets RUN_BUDGET_S (default 360 s)
-  of wall time. At 70 % the LLM is switched off; at 100 % the rest of the run is rules-only.
+- RunBudget: each scenario gets RUN_BUDGET_S (default 300 s) of wall time, GROUND_RULES §1.9
+  ("under 5 minutes per scenario"); 3 hidden scenarios then use 15 of the 20 minutes. At 70 %
+  the LLM is switched off; at 100 % the rest of the run is rules-only.
 
 Never raises: everything here returns data. The caller logs every fault (see core/loop.py).
 """
@@ -59,8 +68,10 @@ LLM_TIMEOUT_S = 8.0         # llm/client.py default for one ask(), all attempts 
 CALL_MARGIN_S = 2.0         # a guarded call may take one full LLM ask plus this
 EVENTS_TIMEOUT_S = 5.0      # event detection and its hooks (stall detector, operator inbox)
 MAX_TIMEOUTS = 3            # timeouts before a caller is benched for the rest of the run
+KILL_AFTER_S = None         # grace after a timeout before the thread is stopped (None = one more
+                            # timeout_s of that call, so 10 s by default)
 MAX_ITEMS = 500             # actions / requests / options in one answer (busiest tick so far: 16)
-RUN_BUDGET_S = 360.0        # 3 hidden scenarios in 20 minutes, with margin
+RUN_BUDGET_S = 300.0        # GROUND_RULES §1.9: under 5 minutes per scenario
 LLM_OFF_AT = 0.7            # fraction of the run budget at which the LLM is switched off
 RULES_ONLY_AT = 1.0         # fraction at which the rest of the run is rules-only
 CLOCK_ATTEMPTS = 6          # advance_time tries before the run stops cleanly. Not 3: with 5 %
@@ -94,8 +105,9 @@ class Outcome:
     elapsed_s: float = 0.0
     label: str = ""
     thread: Optional[threading.Thread] = field(default=None, repr=False)   # still running after a timeout
-    benched: bool = False            # this timeout benched the caller for the rest of the run
-    back: bool = False               # first call after an earlier timed-out call finished
+    benched: bool = False            # this call benched the caller for the rest of the run
+    back: bool = False               # first call after an earlier timed-out call finished ON ITS OWN
+    killed: bool = False             # this call stopped the caller's still-running thread (and benched it)
 
 
 def call_timeout_s() -> float:
@@ -132,6 +144,8 @@ def safe_call(fn: Callable[..., Any], *args: Any, timeout_s: float, default: Any
 
     check(value) runs on the same thread, inside the timeout, so a check that consumes the
     answer can't hang the caller either. It returns the cleaned value or raises GarbageError.
+    A call that times out is left running (out.thread); stopping it is the caller's choice,
+    with cancel() (Guarded does it after a grace period and benches the caller).
     """
     if not (isinstance(timeout_s, (int, float)) and math.isfinite(timeout_s) and timeout_s > 0):
         timeout_s = call_timeout_s()
@@ -165,7 +179,6 @@ def safe_call(fn: Callable[..., Any], *args: Any, timeout_s: float, default: Any
     finished = done.wait(timeout_s)
     elapsed = time.perf_counter() - t0
     if not finished:
-        cancel(th)
         return Outcome(False, default, TIMEOUT, f"no answer within {timeout_s:g} s", elapsed_s=elapsed,
                        label=label, thread=th)
     if "error" in box:
@@ -179,14 +192,20 @@ def safe_call(fn: Callable[..., Any], *args: Any, timeout_s: float, default: Any
 
 class Guarded:
     """safe_call with memory, one per run. A caller (key) whose last call timed out is BUSY
-    until that call's thread has finished, and benched for good after MAX_TIMEOUTS timeouts."""
+    until that call finishes on its own ("back"). If it is still running kill_after_s after the
+    timeout, its thread is stopped and the caller is benched for the rest of the run. Benched
+    for good after MAX_TIMEOUTS timeouts too."""
 
-    def __init__(self, max_timeouts: int = MAX_TIMEOUTS):
+    def __init__(self, max_timeouts: int = MAX_TIMEOUTS, kill_after_s: Optional[float] = KILL_AFTER_S,
+                 clock: Callable[[], float] = time.monotonic):
         self.max_timeouts = max_timeouts
-        self._running: dict[Hashable, threading.Thread] = {}
+        self.kill_after_s = kill_after_s
+        self._clock = clock
+        self._running: dict[Hashable, tuple[threading.Thread, float]] = {}   # key -> (thread, kill at)
         self._labels: dict[Hashable, str] = {}
         self.timeouts: dict[Hashable, int] = {}
         self.benched: set[Hashable] = set()
+        self.killed: set[Hashable] = set()
 
     def benched_labels(self) -> list[str]:
         return sorted(self._labels.get(k, str(k)) for k in self.benched)
@@ -194,33 +213,62 @@ class Guarded:
     def is_busy(self, key: Hashable) -> bool:
         if key in self.benched:
             return True
-        th = self._running.get(key)
-        if th is not None and th.is_alive():
-            return True
-        return False
+        run = self._running.get(key)
+        return run is not None and run[0].is_alive()
+
+    def _kill(self, key: Hashable) -> None:
+        th, _ = self._running.pop(key)
+        cancel(th)
+        self.killed.add(key)
+        self.benched.add(key)
 
     def call(self, key: Hashable, label: str, fn: Callable[..., Any], *args: Any, timeout_s: float,
              default: Any = None, check: Optional[Callable[[Any], Any]] = None, **kwargs: Any) -> Outcome:
         if key in self.benched:
             return Outcome(False, default, BUSY, f"{label} is benched for the rest of the run", label=label)
-        th = self._running.get(key)
+        run = self._running.get(key)
         back = False
-        if th is not None:
+        if run is not None:
+            th, kill_at = run
             if th.is_alive():
-                return Outcome(False, default, BUSY, f"{label} has not finished its last call", label=label)
+                if self._clock() < kill_at:
+                    return Outcome(False, default, BUSY, f"{label} has not finished its last call", label=label)
+                late = max(0.0, self._clock() - kill_at)
+                self._kill(key)
+                return Outcome(False, default, BUSY, f"{late + self._grace(timeout_s):.1f} s after its timeout",
+                               label=label, benched=True, killed=True)
             del self._running[key]
-            back = True
+            back = True                       # finished on its own: its state is consistent
         out = safe_call(fn, *args, timeout_s=timeout_s, default=default, label=label, check=check, **kwargs)
         out.back = back
         if out.kind == TIMEOUT:
             self._labels[key] = label
             self.timeouts[key] = self.timeouts.get(key, 0) + 1
+            if out.thread is not None:
+                self._running[key] = (out.thread, self._clock() + self._grace(timeout_s))
             if self.timeouts[key] >= self.max_timeouts:
                 self.benched.add(key)
                 out.benched = True
-            if out.thread is not None:
-                self._running[key] = out.thread
         return out
+
+    def _grace(self, timeout_s: float) -> float:
+        g = self.kill_after_s
+        return float(g) if isinstance(g, (int, float)) and math.isfinite(g) and g >= 0 else float(timeout_s)
+
+    def shutdown(self) -> list[str]:
+        """End of run: stop every thread still running. Returns their labels. Never raises."""
+        stopped = []
+        for key in list(self._running):
+            try:
+                th, _ = self._running[key]
+                if th.is_alive():
+                    self._kill(key)
+                    stopped.append(self._labels.get(key, str(key)))
+                else:
+                    del self._running[key]
+            except Exception:
+                pass
+        return sorted(stopped)
 
 
 # --------------------------------------------------------------------------

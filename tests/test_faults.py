@@ -10,6 +10,7 @@ practice scenarios and needs the workbook in data/.
 import json
 import threading
 import time
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -90,7 +91,7 @@ def test_safe_call_gives_up_on_a_hang_and_returns_the_default():
         gate.set()
 
 
-def test_safe_call_stops_a_cpu_spin_after_the_timeout():
+def test_safe_call_leaves_a_timed_out_call_running_and_cancel_stops_a_spin():
     stop = threading.Event()
 
     def spin():
@@ -99,6 +100,8 @@ def test_safe_call_stops_a_cpu_spin_after_the_timeout():
     try:
         out = safety.safe_call(spin, timeout_s=0.1, label="spin")
         assert out.kind == safety.TIMEOUT
+        assert out.thread.is_alive()               # not killed by safe_call itself
+        assert safety.cancel(out.thread)
         out.thread.join(2.0)
         assert not out.thread.is_alive()           # stopped by the cancel, not by `stop`
     finally:
@@ -151,7 +154,7 @@ def test_coordination_and_choice_shapes():
 
 def test_guarded_never_runs_one_caller_on_two_threads(faulty):
     agent = faulty(SkeletonAgent(), "hang", every=1, limit=1)
-    calls = safety.Guarded()
+    calls = safety.Guarded(kill_after_s=60)              # long grace: it must come back on its own
     first = calls.call("a", "agent.propose", agent.propose, None, [], timeout_s=0.05)
     assert first.kind == safety.TIMEOUT and not first.benched
     for _ in range(3):                                   # still hanging: not called again
@@ -160,12 +163,55 @@ def test_guarded_never_runs_one_caller_on_two_threads(faulty):
     agent.release()
     first.thread.join(1.0)
     back = calls.call("a", "agent.propose", lambda s, e: ([], []), None, [], timeout_s=1)
-    assert back.ok and back.back
+    assert back.ok and back.back and not back.killed     # finished on its own: used again
     assert agent.max_in_flight == 1
 
 
+def test_guarded_kills_a_call_still_running_after_the_grace_and_benches_it_for_good():
+    stop = threading.Event()
+    now = [0.0]
+
+    def spin():
+        while not stop.is_set():
+            pass
+    calls = safety.Guarded(kill_after_s=5, clock=lambda: now[0])
+    try:
+        first = calls.call("k", "spin.propose", spin, timeout_s=0.05)
+        assert first.kind == safety.TIMEOUT and not first.benched
+        now[0] = 4.9                                       # inside the grace: just busy
+        out = calls.call("k", "spin.propose", spin, timeout_s=0.05)
+        assert out.kind == safety.BUSY and not out.killed and not out.benched
+        now[0] = 5.0                                       # grace over, still spinning: killed
+        out = calls.call("k", "spin.propose", spin, timeout_s=0.05)
+        assert out.kind == safety.BUSY and out.killed and out.benched
+        first.thread.join(2.0)
+        assert not first.thread.is_alive()                 # the spin was stopped
+        later = calls.call("k", "spin.propose", lambda: 1, timeout_s=1)
+        assert later.kind == safety.BUSY and not later.back   # a killed caller never comes back
+        assert calls.benched_labels() == ["spin.propose"] and calls.killed == {"k"}
+    finally:
+        stop.set()
+
+
+def test_guarded_shutdown_stops_every_thread_still_running():
+    stop = threading.Event()
+
+    def spin():
+        while not stop.is_set():
+            pass
+    calls = safety.Guarded(kill_after_s=60)
+    try:
+        out = calls.call("k", "spin.propose", spin, timeout_s=0.05)
+        assert calls.shutdown() == ["spin.propose"]
+        out.thread.join(2.0)
+        assert not out.thread.is_alive() and calls.benched_labels() == ["spin.propose"]
+        assert calls.shutdown() == []                      # nothing left
+    finally:
+        stop.set()
+
+
 def test_guarded_benches_a_caller_after_3_timeouts():
-    calls = safety.Guarded()
+    calls = safety.Guarded(kill_after_s=60)
     for i in range(safety.MAX_TIMEOUTS):
         out = calls.call("k", "slow.propose", time.sleep, 0.2, timeout_s=0.02)
         assert out.kind == safety.TIMEOUT and out.benched == (i == safety.MAX_TIMEOUTS - 1)
@@ -189,8 +235,8 @@ def test_run_budget_phases():
     assert b.report() == {"budget_s": 100.0, "used_s": 100.0, "llm_off_at_s": 70.0, "rules_only_at_s": 100.0}
 
 
-@pytest.mark.parametrize("env,expected", [("120", 120.0), ("abc", 360.0), ("-5", 360.0), ("nan", 360.0),
-                                          (None, 360.0)])
+@pytest.mark.parametrize("env,expected", [("120", 120.0), ("abc", 300.0), ("-5", 300.0), ("nan", 300.0),
+                                          (None, 300.0)])
 def test_run_budget_reads_run_budget_s(monkeypatch, env, expected):
     if env is None:
         monkeypatch.delenv("RUN_BUDGET_S", raising=False)
@@ -297,24 +343,31 @@ def _tiny_loop(tmp_path, agents=None, api=None, **kw):
 def test_hanging_agent_times_out_and_the_run_finishes(tmp_path, faulty):
     agent = faulty(SkeletonAgent(), "hang", every=3)
     t0 = time.perf_counter()
-    s = _tiny_loop(tmp_path, [agent], call_timeout_s=0.1).run()
+    s = _tiny_loop(tmp_path, [agent], call_timeout_s=0.1, kill_after_s=60).run()
     assert time.perf_counter() - t0 < 10
     assert s["loop"]["stopped_early"] is None and s["loop"]["ticks"] == 24     # 6 h of 15-min ticks
     assert s["loop"]["timeouts"] == 1 and s["loop"]["busy_ticks"] == 25 - 3     # 25 steps; busy after #3
     assert agent.calls == 3 and agent.max_in_flight == 1
     (line,) = [d for d in _decisions(tmp_path) if d["choice"] == "timeout"]
     assert "rules-only" in line["reason"] and "skipped until that call returns" in line["reason"]
+    (end,) = [d for d in _decisions(tmp_path) if d["choice"] == "killed"]       # still hanging at the end
+    assert "end of the run" in end["reason"] and s["loop"]["killed"] == 1
 
 
-def test_spinning_agent_is_stopped_and_benched_after_3_timeouts(tmp_path, faulty):
+def test_spinning_agent_is_killed_once_and_benched_never_reused(tmp_path, faulty):
+    # Leader's review of PR #13: stopping a thread from outside skips the agent's own cleanup,
+    # so its state may be half-updated. A killed agent must never be "recovered".
     agent = faulty(SkeletonAgent(), "spin", every=2)
-    s = _tiny_loop(tmp_path, [agent], call_timeout_s=0.1).run()
-    assert s["loop"]["timeouts"] == 3 and s["loop"]["benched"] == ["skeleton.propose"]
-    assert agent.max_in_flight == 1
+    s = _tiny_loop(tmp_path, [agent], call_timeout_s=0.1, kill_after_s=0).run()
+    assert s["loop"]["timeouts"] == 1 and s["loop"]["killed"] == 1
+    assert s["loop"]["benched"] == ["skeleton.propose"]
+    assert agent.calls == 2 and agent.max_in_flight == 1     # never called again after the timeout
     assert _no_live_workers()                                 # no spinning thread left behind
     lines = _decisions(tmp_path)
-    assert sum(d["choice"] == "recovered" for d in lines) == 2    # came back after timeouts 1 and 2
-    assert "benched for the rest of the run" in [d for d in lines if d["choice"] == "timeout"][-1]["reason"]
+    assert not any(d["choice"] == "recovered" for d in lines)
+    (kill,) = [d for d in lines if d["choice"] == "killed"]
+    assert "benched for the rest of the run" in kill["reason"] and kill["tick"] == 2
+    assert s["loop"]["stopped_early"] is None and s["loop"]["ticks"] == 24     # the run still finishes
 
 
 def test_garbage_answers_are_logged_and_never_executed(tmp_path, faulty):
@@ -363,6 +416,31 @@ def test_a_failed_first_read_is_retried_not_the_end_of_the_run(tmp_path):
     s = _tiny_loop(tmp_path, api=FirstReadsFail(2)).run()
     assert s["loop"]["stopped_early"] is None and s["loop"]["ticks"] == 4 and s["loop"]["exceptions"] == 2
     assert sum("first snapshot" in d["reason"] for d in _decisions(tmp_path)) == 2
+
+
+class ClockReadsDie(TinyAPI):
+    """The clock can't be read after `after_h` hours, for the rest of the run; advance_time works.
+    core/state.py then keeps the OLD time in every snapshot (it falls back to the last one)."""
+
+    def __init__(self, hours, after_h):
+        super().__init__(hours=hours)
+        self.dies_at = self.now + timedelta(hours=after_h)
+
+    def call(self, name, arguments=None):
+        if name == "get_current_time" and self.now >= self.dies_at:
+            return {"error": "clock service down"}
+        return super().call(name, arguments)
+
+
+def test_clock_reads_dying_for_good_still_stop_at_the_window_end(tmp_path):
+    # Leader's review of PR #13: without tracking advance_time's own answer, the loop compared
+    # the stale snapshot time with the window end and ran to max_ticks (5,000 vs ~1,440 there).
+    api = ClockReadsDie(hours=6, after_h=1)
+    loop = _tiny_loop(tmp_path, api=api, max_ticks=5000)
+    s = loop.run()
+    assert api.now >= api.end
+    assert loop.tick == 24 and s["loop"]["stopped_early"] is None             # 6 h of 15-min ticks
+    assert loop.clock_now == api.end
 
 
 def test_a_simulator_that_never_answers_stops_after_5_tries(tmp_path):

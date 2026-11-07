@@ -13,6 +13,11 @@ boxes without a yard slot are placed:
 "Nearest" is the truck travel time from the ship's berth to the block (static
 reference data from the terminal, the same in every scenario).
 
+Negotiation (CORE-5): for each such ship it asks the coordinator for yard slots
+(`Request(resource="yard_slots", amount=<unplaced imports>)`) and places at most what it was
+granted. `grants` is set by the loop: None means no coordinator (everything granted, v0
+behaviour); otherwise `grants[("yard_slots", call_id)]` slots, 0 if absent.
+
 A box with nowhere legal to go is never forced: it stays queued and is tried
 again next tick (the ship cannot discharge it until then), and the ship is
 escalated once. A box with an unknown cargo type is never placed and is
@@ -23,10 +28,11 @@ It only proposes; the loop sends each action through the guard and the executor.
 from __future__ import annotations
 
 import math
+from typing import Optional
 
 from core.types import (BLOCK_EMPTY, BLOCK_IMDG, BLOCK_REEFER, BLOCK_STANDARD, CARGO_DRY, CARGO_IMDG,
-                        CARGO_REEFER, KNOWN_CARGO, SHIP_BERTHED, SHIP_WORKING, TOOL_PLACE, Action,
-                        Event, Request, WorldState)
+                        CARGO_REEFER, KNOWN_CARGO, RES_YARD_SLOTS, SHIP_BERTHED, SHIP_WORKING, TOOL_PLACE,
+                        Action, Event, Request, WorldState)
 
 AGENT = "yard"
 SOFT_FILL = 0.85            # keep standard blocks at or under 85% while other room exists
@@ -49,6 +55,7 @@ class YardAgent:
     def __init__(self) -> None:
         self.escalations: list[str] = []      # drained and logged by the loop
         self._flagged: set[str] = set()
+        self.grants: Optional[dict] = None    # set by the loop from the coordinator's grants (CORE-5)
 
     def _escalate(self, key: str, message: str) -> None:
         if key not in self._flagged:
@@ -76,6 +83,7 @@ class YardAgent:
 
     def propose(self, state: WorldState, events: list[Event]) -> tuple[list[Action], list[Request]]:
         actions: list[Action] = []
+        requests: list[Request] = []
         blocks = {b.block_id: b for b in state.blocks}
         free = {b.block_id: b.free for b in state.blocks}
         for s in state.ships:
@@ -92,13 +100,19 @@ class YardAgent:
                     continue
                 todo.setdefault(c.cargo_type, []).append(c.container_id)
 
+            want = sum(len(v) for v in todo.values())
+            if want:
+                requests.append(Request(
+                    AGENT, RES_YARD_SLOTS, want, s.call_id, 1.0,
+                    f"{want} import boxes of {s.call_id} need a yard slot before they can be discharged."))
+            limit = want if self.grants is None else self.grants.get((RES_YARD_SLOTS, s.call_id), 0)
             queued = 0
             for cargo in (CARGO_IMDG, CARGO_REEFER, CARGO_DRY):
                 boxes = todo.get(cargo, [])
                 for block_id, room in self._targets(cargo, s.berth, blocks, free):
-                    if not boxes:
+                    if not boxes or limit <= 0:
                         break
-                    n = min(room, free[block_id], len(boxes))
+                    n = min(room, free[block_id], len(boxes), limit)
                     if n <= 0:
                         continue
                     batch, boxes = boxes[:n], boxes[n:]
@@ -110,9 +124,11 @@ class YardAgent:
                         f"{block_id} is the nearest legal {blk.block_type} block with room "
                         f"({_travel(s.berth, block_id):g} min from {s.berth}, {after}/{blk.slots} after)."))
                     free[block_id] -= n
-                queued += len(boxes)
+                    limit -= n
+                if limit > 0:
+                    queued += len(boxes)                 # granted, but no legal room
             if queued:
                 self._escalate(f"queue:{s.call_id}",
                                f"{queued} import boxes of {s.call_id} have no legal yard slot; they wait "
                                f"for space and the ship cannot discharge them until then.")
-        return actions, []
+        return actions, requests

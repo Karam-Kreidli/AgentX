@@ -33,3 +33,14 @@ tools/            eval_all, perturb, compare, timeline, check.sh
 vendor/           organizer toolkit, unmodified
 tests/
 ```
+
+## Model choice (LLM-3)
+
+Bake-off on real decision points from our runs (`python -m llm.bakeoff.collect`, then `run_bakeoff` per model and `choose`). Injection strings are the provisional set in `llm/bakeoff/injections.txt` until SAFE-5's corpus exists.
+
+| Model | Revision | Valid | Agrees with rules | Injections resisted | p50 / p95 s | 16 parallel s | tok/s | Same on repeat |
+|---|---|---|---|---|---|---|---|---|
+| qwen | `017b9c7af6b5` | 1.0 | 1.0 (22 informative) | 1.0 (29) | 2.52 / 3.078 | 7.42 | 21.5 | 1.0 |
+| gptoss | `6cee5e81ee83` | 0.94 | 1.0 (22 informative) | 0.828 (29) | 0.86 / 1.875 | 4.94 | 145.3 | 0.7 |
+
+**Chosen: qwen @ `017b9c7af6b5689d5dd426a76e0bc077eb5ca20a`**, the only model that passes every gate (quality 1.00); not eligible: gptoss (valid 0.94 < 0.98, injection resisted 0.828 < 0.9, repeat 0.7 < 0.9). Set `LLM_CALL_BUDGET=87` (one call per tick at most; 5 min per scenario minus ~30 s of simulation, at p95 3.078 s).

@@ -15,7 +15,7 @@ The only way our code talks to a language model:
   attempts; connecting gets at most 2 s, so a VM that is off fails fast.
 - Each backend gets one retry (timeout, 429, 5xx, invalid output); then the next one.
 - A backend that fails twice in a row is skipped for 60 s (circuit breaker).
-- At most LLM_CALL_BUDGET HTTP requests per scenario (default 150); new_scenario() resets it.
+- At most LLM_CALL_BUDGET HTTP requests per scenario (default 87, from the LLM-3 bake-off); new_scenario() resets it.
 - The reply must parse as JSON and match the pydantic schema, or it counts as no answer.
 - Returns a plain dict, or None when nothing valid came back. Rules-only is always the last resort.
 
@@ -47,10 +47,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_TIMEOUT_S = 8.0       # total per ask(), all attempts included
 CONNECT_TIMEOUT_S = 2.0       # a VM that is off or unreachable fails within this
-DEFAULT_BUDGET = 150          # HTTP requests per scenario
+DEFAULT_BUDGET = 87           # HTTP requests per scenario (LLM-3: qwen p95 3.1 s)
 MAX_UNTRUSTED = 80            # untrusted text cap (Ground rules §5)
 MAX_STRING = 400              # cap for any string in a payload
 MAX_TOKENS = 300
+REASONING_MAX_TOKENS = 800    # gpt-oss counts its (low-effort) reasoning against max_tokens
 BREAKER_FAILS = 2             # consecutive failed asks before a backend is skipped
 BREAKER_COOLDOWN_S = 60.0
 MAX_RETRY_AFTER_S = 2.0       # never wait longer than this for a 429
@@ -307,7 +308,9 @@ class LLMClient:
     def _body(self, b: Backend, system: Optional[str], user: str, json_schema: dict, max_tokens: int) -> dict:
         sys_prompt = BASE_SYSTEM + ("\n\n" + system if system else "")
         body: dict[str, Any] = {"model": b.model, "temperature": 0, "seed": 0, "max_tokens": max_tokens}
-        name = b.model.lower()
+        # Match the family on letters and digits only: vLLM may serve gpt-oss as "gptoss",
+        # Groq as "openai/gpt-oss-120b".
+        name = re.sub(r"[^a-z0-9]", "", b.model.lower())
         if b.kind == "vllm":
             body["structured_outputs"] = {"json": json_schema}
         else:
@@ -315,8 +318,9 @@ class LLMClient:
             body["response_format"] = {"type": "json_object"}
         if "qwen" in name:
             body["chat_template_kwargs"] = {"enable_thinking": False}
-        elif "gpt-oss" in name:
+        elif "gptoss" in name:
             body["reasoning_effort"] = "low"
+            body["max_tokens"] = max(max_tokens, REASONING_MAX_TOKENS)
         body["messages"] = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user}]
         return body
 
