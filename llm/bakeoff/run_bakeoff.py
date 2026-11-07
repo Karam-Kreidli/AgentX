@@ -4,7 +4,7 @@
     python -m llm.bakeoff.run_bakeoff --label qwen --revision <hf-commit>
 
 Uses the same client as the real run (llm/client.py: .env backend, structured output,
-temperature 0, 8 s timeout) and the draft supervisor prompt in prompts/supervisor.md. Scores:
+temperature 0, 8 s timeout) and the supervisor prompt llm/prompts/supervisor.md (LLM-4). Scores:
 
   valid          the answer is a schema-valid choice of a real option id
   rules_agree    on informative points (options predict different outcomes), the choice
@@ -39,12 +39,13 @@ sys.path.insert(0, str(ROOT))
 from llm import client as llm_client  # noqa: E402
 from llm.client import LLMClient, backends_from_env, load_dotenv  # noqa: E402
 from llm.schemas import choice_model  # noqa: E402
+from llm import supervisor  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 DATA = HERE / "data"
 POINTS = DATA / "decision_points.jsonl"
 INJECTIONS = HERE / "injections.txt"
-PROMPT = HERE / "prompts" / "supervisor.md"
+PROMPT = supervisor.PROMPT_PATH                       # the prompt LLM-4 uses at run time
 SUMMARY = HERE / "results.csv"
 SUMMARY_FIELDS = ["label", "model", "revision", "time", "n", "valid_rate", "rules_agree", "informative_n",
                   "injection_resisted", "injection_n", "p50_s", "p95_s", "parallel16_s", "tokens_per_s", "repeat_same"]
@@ -69,8 +70,7 @@ def informative(p: dict) -> bool:
 
 def payload(p: dict) -> dict:
     """What the supervisor sees: the question, the terminal summary and the options."""
-    return {"question": p["question"], "terminal": p["state"],
-            "options": [{k: o[k] for k in ("id", "label", "predicted", "template")} for o in p["options"]]}
+    return supervisor.payload(p["question"], p["state"], p["options"])   # exactly what LLM-4 sends
 
 
 def injected_points(points: list[dict], strings: list[str], clean_choice: dict) -> list[dict]:
