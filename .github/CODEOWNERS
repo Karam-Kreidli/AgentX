@@ -1,0 +1,15 @@
+# SAFE-6: the files that decide what is safe. A PR touching them needs a review from
+# D (mohammed-ah-14) or E (Karam-Kreidli).
+# Takes effect once this file is on main and branch protection has "Require review from
+# Code Owners" on. GROUND_RULES.md asks for two approvals for its own changes: set
+# "Required approvals" to 2 as well, or keep to that rule by hand.
+
+/guard.py                 @mohammed-ah-14 @Karam-Kreidli
+GROUND_RULES.md           @mohammed-ah-14 @Karam-Kreidli
+/tests/test_guard.py      @mohammed-ah-14 @Karam-Kreidli
+
+# The CI check itself, so it can't be switched off quietly
+/tools/check.sh           @mohammed-ah-14 @Karam-Kreidli
+/tools/check_*.py         @mohammed-ah-14 @Karam-Kreidli
+/tests/redteam/           @mohammed-ah-14 @Karam-Kreidli
+/.github/                 @mohammed-ah-14 @Karam-Kreidli
