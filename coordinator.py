@@ -17,6 +17,10 @@ Yard slots (the bottleneck):
      The yard agent fills it in the same order, so a grant is exactly what it can place.
 Trucks, cranes, berths: what is free right now, highest priority first, then arrival order.
 
+Competing berth/crane plans (BC-3): when no yard judgement is pending, `agents/options.py`
+may return 2-3 rule-safe Options (e.g. which waiting ship takes a free berth); they are
+returned with the grants for the supervisor to choose from, option 0 being the agents' plan.
+
 Forecast write-offs are switched off for now (OFFER_FORECAST_WRITE_OFFS, see below): every
 ship that is not impossible is served. When switched on: when YARD-3 writes off a ship that is
 not impossible (a judgement call: give up one ship so others finish), the coordinator offers the supervisor two Options: keep serving every ship
@@ -247,9 +251,21 @@ def decide(requests: list[Request], state: WorldState) -> tuple[list[Grant], lis
         else:
             g = [Grant(r, 0, REFUSED, f"Unknown resource {str(res)[:20]!r}.") for r in reqs]
         grants += g
-    if not options:                       # with options pending the loop decides again after the pick
+    yard_pending = bool(options)          # the loop decides again after the pick: log that answer
+    if not options:
+        options = _plan_options(state)
+    if not yard_pending:
         _transcript(grants)
     return grants, options
+
+
+def _plan_options(state: WorldState) -> list[Option]:
+    """BC-3: competing berth/crane plans for the supervisor (agents/options.py), or []."""
+    try:
+        from agents import options as plans
+        return plans.build(state)
+    except Exception:
+        return []
 
 
 def _transcript(grants: list[Grant]) -> None:
