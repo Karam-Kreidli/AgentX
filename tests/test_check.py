@@ -174,6 +174,20 @@ def test_corpus_covers_every_category_and_is_well_formed():
     assert {"override", "fake_authority", "system_mimicry", "option_tampering", "json_breaking", "control_bidi",
             "long_text", "arabic", "mixed_language", "exfiltration", "tool_call_mimicry"} <= cats
     assert any(len(t) > 80 for t in check_redteam.load_corpus())
+    assert len(rows) >= 30
+    assert {"vessel_name", "container_id", "service", "hold_details", "operator_message", "tool_error"} <= {
+        f for r in rows for f in r["target_fields"]}
+    assert any("\u0000" in t or "\u202e" in t for t in check_redteam.load_corpus())
+
+
+def test_operator_messages_are_well_formed():
+    path = check_redteam.CORPUS.with_name("operator_messages.jsonl")
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
+    assert len(rows) >= 30 and len({r["id"] for r in rows}) == len(rows)
+    assert all(set(r) == {"id", "category", "text", "target_fields", "expected"} for r in rows)
+    assert all(r["target_fields"] == ["operator_message"] and r["expected"] for r in rows)
+    assert {"override", "fake_authority", "system_mimicry", "option_tampering", "json_breaking", "control_bidi",
+            "long_text", "arabic", "mixed_language", "exfiltration", "tool_call_mimicry"} <= {r["category"] for r in rows}
 
 
 def test_inject_renames_every_ship_uniquely_and_maps_back():

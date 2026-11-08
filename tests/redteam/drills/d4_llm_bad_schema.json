@@ -1,0 +1,12 @@
+{
+  "id": "llm_bad_schema",
+  "title": "Drill 4: LLM down (bad_schema) mid-run",
+  "scenarios": [
+    "practice_01",
+    "practice_03"
+  ],
+  "llm": "bad_schema",
+  "expect": {
+    "same_actions_as_rules": true
+  }
+}

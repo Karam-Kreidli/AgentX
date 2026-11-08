@@ -1,0 +1,27 @@
+{
+  "id": "burst",
+  "title": "Drill 3: 2 cranes + 5 trucks down within an hour",
+  "scenarios": [
+    "practice_01",
+    "practice_03",
+    "practice_05"
+  ],
+  "mutations": [
+    {
+      "op": "break",
+      "kind": "crane",
+      "count": 2,
+      "after_first_arrival_h": 6,
+      "for_h": 4
+    },
+    {
+      "op": "break",
+      "kind": "truck",
+      "count": 5,
+      "after_first_arrival_h": 6.5,
+      "for_h": 4
+    }
+  ],
+  "llm": "off",
+  "expect": {}
+}

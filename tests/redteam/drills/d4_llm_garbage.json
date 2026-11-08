@@ -1,0 +1,12 @@
+{
+  "id": "llm_garbage",
+  "title": "Drill 4: LLM down (garbage) mid-run",
+  "scenarios": [
+    "practice_01",
+    "practice_03"
+  ],
+  "llm": "garbage",
+  "expect": {
+    "same_actions_as_rules": true
+  }
+}

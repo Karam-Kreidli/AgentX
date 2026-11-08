@@ -1,0 +1,12 @@
+{
+  "id": "llm_slow",
+  "title": "Drill 4: LLM down (slow) mid-run",
+  "scenarios": [
+    "practice_01",
+    "practice_03"
+  ],
+  "llm": "slow",
+  "expect": {
+    "same_actions_as_rules": true
+  }
+}

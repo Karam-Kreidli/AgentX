@@ -1,0 +1,12 @@
+{
+  "id": "llm_dies",
+  "title": "Drill 4: the served model is switched off mid-run",
+  "scenarios": [
+    "practice_01",
+    "practice_03"
+  ],
+  "llm": "real_then_down",
+  "llm_die_after": 6,
+  "needs_llm": true,
+  "expect": {}
+}

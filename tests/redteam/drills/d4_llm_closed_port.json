@@ -1,0 +1,12 @@
+{
+  "id": "llm_closed_port",
+  "title": "Drill 4: LLM down (closed_port) mid-run",
+  "scenarios": [
+    "practice_01",
+    "practice_03"
+  ],
+  "llm": "closed_port",
+  "expect": {
+    "same_actions_as_rules": true
+  }
+}

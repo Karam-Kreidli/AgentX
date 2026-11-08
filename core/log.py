@@ -74,7 +74,7 @@ _SECRET_PATTERNS = (
 )
 # Control characters (except \t \n \r, handled separately), zero-width and bidi controls.
 _INVISIBLE = re.compile("[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f"
-                        "​-‏‪-‮⁠-⁤⁦-⁩﻿]")
+                        "​-‏\u2028\u2029‪-‮⁠-⁤⁦-⁩﻿]")
 _WHITESPACE = re.compile(r"\s+")
 
 
@@ -491,7 +491,7 @@ def count_missing_reasons(run_dir: Path | str) -> int:
     """State-changing calls that were sent without a reason (must be 0).
     Raises if decisions.jsonl is missing or unreadable: that is a failure in itself."""
     n = 0
-    for line in (Path(run_dir) / DECISIONS).read_text(encoding="utf-8").splitlines():
+    for line in (Path(run_dir) / DECISIONS).read_text(encoding="utf-8").split("\n"):
         if not line.strip():
             continue
         rec = json.loads(line)
@@ -507,7 +507,7 @@ def simulator_log_counts(run_dir: Path | str) -> dict:
     tool_error (a call the simulator refused) must be treated as seriously as a VIOLATION:
     both must be 0. Raises if actions.jsonl is missing or unreadable."""
     counts = {"tool_call": 0, "tool_error": 0, "VIOLATION": 0, "tool_error_tools": {}, "violation_types": {}}
-    for line in (Path(run_dir) / "actions.jsonl").read_text(encoding="utf-8").splitlines():
+    for line in (Path(run_dir) / "actions.jsonl").read_text(encoding="utf-8").split("\n"):
         if not line.strip():
             continue
         rec = json.loads(line)

@@ -263,6 +263,18 @@ def test_count_missing_reasons(tmp_path):
     assert log.count_missing_reasons(tmp_path) == 1
 
 
+def test_line_and_paragraph_separators_cannot_split_a_decision_line(tmp_path):
+    """SAFE-5 drill 1b: a tool error quoted U+2028/U+2029, which str.splitlines() treats as a line break,
+    so count_missing_reasons crashed on the half line. They are marked like other invisible characters,
+    and the readers split on \\n only."""
+    log.start(tmp_path)
+    log.decision(decision(reason="read failed: MV Split\u2028{\"a\": 1}\u2029after\u0085end"))
+    raw = (tmp_path / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "\u2028" not in raw and "\u2029" not in raw and "[U+2028]" in raw
+    assert len(raw.split("\n")) == 2 and len(raw.splitlines()) == 1
+    assert log.count_missing_reasons(tmp_path) == 0
+
+
 def test_simulator_log_counts_refusals_and_violations(tmp_path):
     rows = [{"action": "session_start"},
             {"action": "tool_call", "tool": "assign_berth"},
