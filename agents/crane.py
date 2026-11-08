@@ -82,7 +82,25 @@ def demand(state: WorldState, s, room: Optional[dict] = None, impossible: Option
             reach = (min(unplaced[CARGO_IMDG], room[BLOCK_IMDG])
                      + min(unplaced[CARGO_REEFER], room[BLOCK_REEFER])
                      + min(unplaced[CARGO_DRY], room[BLOCK_STANDARD] + room[BLOCK_EMPTY] + room[BLOCK_REEFER]))
-        work = at_quay + reach
+        return _cranes_for(s, at_quay + reach, total)
+    return _cranes_for(s, work, None)
+
+
+def with_yard(state: WorldState, s, new_slots: int) -> int:
+    """Cranes ship `s` can keep busy this tick if the yard takes `new_slots` more of its boxes.
+    Used by the coordinator's joint check (crane + yard grants decided together)."""
+    if s.status not in AT_BERTH or not s.berth:
+        return 0
+    if s.discharge_remaining <= 0:
+        return _cranes_for(s, s.load_remaining, None)
+    total, placed, _ = stall._imports(state, s.call_id)
+    at_quay = max(0, placed - stall._discharged(s))
+    return _cranes_for(s, at_quay + max(0, new_slots), total)
+
+
+def _cranes_for(s, work: int, total: Optional[int]) -> int:
+    """Cranes that `work` moves keep busy for one tick (0..MAX_PER_SHIP)."""
+    if s.discharge_remaining > 0:
         if total == 0:
             work = s.discharge_remaining                # no manifest rows: can't judge, assume it can work
         if work >= s.discharge_remaining:

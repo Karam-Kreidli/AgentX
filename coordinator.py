@@ -268,12 +268,56 @@ def decide(requests: list[Request], state: WorldState) -> tuple[list[Grant], lis
         else:
             g = [Grant(r, 0, REFUSED, f"Unknown resource {str(res)[:20]!r}.") for r in reqs]
         grants += g
+    grants = _joint(grants, state, order)
     yard_pending = bool(options)          # the loop decides again after the pick: log that answer
     if not options:
         options = _plan_options(state)
     if not yard_pending:
         _transcript(grants, use_llm=not options)      # options pending: the supervisor gets the LLM
     return grants, options
+
+
+def _joint(grants: list[Grant], state: WorldState, order: dict) -> list[Grant]:
+    """Crane grants decided together with the yard and trucks they depend on.
+
+    The pools above are granted one resource at a time. A crane is only useful with boxes to
+    move and trucks to carry them, so each ship's crane grant is checked against
+      - the yard slots it was granted this round (a discharging ship can only discharge boxes
+        that have a yard slot: boxes at the quay + this round's grant), and
+      - the trucks in service (3 per crane for full speed), shared in priority order.
+    A crane grant the yard or trucks can't support is trimmed with that reason; the crane agent
+    re-plans within it, so the freed cranes go to a ship that can use them. Never raises."""
+    try:
+        cranes = [g for g in grants if g.request.resource == RES_CRANES and g.granted > 0]
+        if not cranes:
+            return grants
+        from agents import crane as crane_agent
+        yard = {g.request.call_id: g for g in grants if g.request.resource == RES_YARD_SLOTS}
+        trucks = sum(1 for t in state.trucks if t.status != EQ_OUT_OF_SERVICE) if state.trucks else None
+        new = {}
+        for g in sorted(cranes, key=lambda g: (-g.request.priority, order.get(g.request.call_id, 1e9),
+                                               g.request.call_id)):
+            cid, k, why = g.request.call_id, g.granted, []
+            s = state.ship(cid)
+            yg = yard.get(cid)
+            if s is not None and s.discharge_remaining > 0 and yg is not None:
+                k_yard = crane_agent.with_yard(state, s, yg.granted)
+                if k_yard < k:
+                    k = k_yard
+                    why.append(f"the yard can take {yg.granted} of the {yg.request.amount} boxes waiting to "
+                               f"come off it this round, which keeps {k_yard} crane{'s' if k_yard != 1 else ''} busy")
+            if trucks is not None:                 # a snapshot listing no trucks (failed read): no limit
+                k_trucks = trucks // 3 if trucks >= 3 else min(1, trucks)
+                if k_trucks < k:
+                    k = k_trucks
+                    why.append(f"only {trucks} trucks are left in service to run them (3 per crane)")
+                trucks = max(0, trucks - 3 * k)
+            if k < g.granted:
+                reason = f"Joint check: {cid} gets {k} of {g.granted} cranes: " + "; ".join(why) + "."
+                new[id(g)] = Grant(g.request, k, TRIMMED if k > 0 else REFUSED, reason)
+        return [new.get(id(g), g) for g in grants]
+    except Exception:                          # the pools' grants still stand
+        return grants
 
 
 def _plan_options(state: WorldState) -> list[Option]:
