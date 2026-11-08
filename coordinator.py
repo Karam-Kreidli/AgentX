@@ -243,6 +243,12 @@ def decide(requests: list[Request], state: WorldState) -> tuple[list[Grant], lis
         reset()
         _mem.scenario = key
     order = {s.call_id: i for i, s in enumerate(state.ships)}
+    try:                                       # LLM-6: ships the operator prioritised go first
+        from llm import operator
+        for k, cid in enumerate(reversed(operator.directives(state).priority)):
+            order[cid] = -1 - k
+    except Exception:
+        pass
     by_res: dict[str, list[Request]] = {}
     for r in requests:
         by_res.setdefault(r.resource, []).append(r)

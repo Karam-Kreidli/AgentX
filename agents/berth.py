@@ -11,7 +11,10 @@ Every tick, for the ships that have arrived and fit some berth:
 2. Best fit (which berth). Each ship takes the SMALLEST free berth it fits, so the long, deep
    berths stay free for the ships that only fit there. On practice_02 first-free-berth put a
    220 m ship on B1, and the 290 m ship that arrived 1.5 h later (it fits only B1) waited 24 h.
-3. Keep a berth for a ship that only fits there, when that ship is due soon: a free berth is not
+3. Operator directives (LLM-6, checked by llm/operator.py before they get here): prioritised
+   ships go first (after impossible ones), held ships are not berthed, a reserved berth goes
+   only to its ship (or to nobody while it is kept free).
+4. Keep a berth for a ship that only fits there, when that ship is due soon: a free berth is not
    given to a ship that fits another berth if a ship that fits ONLY this berth has its scheduled
    ETA within HOLD_H hours (scheduled ETA from the schedule; the actual arrival is only used once
    a ship has arrived, never the hidden one).
@@ -48,10 +51,22 @@ def _impossible(state: WorldState) -> set:
         return set()
 
 
+def _operator(state: WorldState):
+    """LLM-6 directives (prioritised / held ships, reserved berths), or None. Never raises."""
+    try:
+        from llm import operator
+        return operator.directives(state)
+    except Exception:
+        return None
+
+
 def rank(state: WorldState, ships: list) -> list:
-    """Who goes first: possible ships before impossible ones, then least work, then arrival."""
+    """Who goes first: possible ships before impossible ones, then ships the operator
+    prioritised (LLM-6), then least work, then arrival."""
     hopeless = _impossible(state)
-    return sorted(ships, key=lambda s: (s.call_id in hopeless, s.remaining_moves,
+    d = _operator(state)
+    prio = {c: i for i, c in enumerate(d.priority)} if d is not None else {}
+    return sorted(ships, key=lambda s: (s.call_id in hopeless, prio.get(s.call_id, len(prio)), s.remaining_moves,
                                         s.actual_arrival or state.now, s.call_id))
 
 
@@ -59,7 +74,10 @@ def plan(state: WorldState) -> list[tuple]:
     """[(ship, berth, why)] the agent would berth now, in order. Shared with BC-3's option 0."""
     occupied = {s.berth for s in state.ships if s.berth and s.status in BUSY}
     free = sorted((b for b in state.berths if b.berth_id not in occupied), key=lambda b: (b.length_m, b.max_draft_m))
-    waiting = [s for s in state.ships if s.status == SHIP_ARRIVED and _valid(s)]
+    d = _operator(state)
+    on_hold = set(d.held) if d is not None else set()
+    reserved = dict(d.reserved) if d is not None else {}          # berth -> call id, or None = keep free
+    waiting = [s for s in state.ships if s.status == SHIP_ARRIVED and _valid(s) and s.call_id not in on_hold]
     soon = state.now + timedelta(hours=HOLD_H)
     held = set()
     for e in state.ships:
@@ -71,11 +89,17 @@ def plan(state: WorldState) -> list[tuple]:
     for s in rank(state, waiting):
         fits = [b for b in free if b.fits(s.loa_m, s.draft_m)]
         n_fit = sum(1 for b in state.berths if b.fits(s.loa_m, s.draft_m))
-        choice = next((b for b in fits if b.berth_id not in held or n_fit == 1), None)
+        own = [b for b in fits if reserved.get(b.berth_id, "-") == s.call_id]     # reserved for this ship
+        open_ = [b for b in fits if b.berth_id not in reserved and (b.berth_id not in held or n_fit == 1)]
+        choice = (own or open_ or [None])[0]
         if choice is None:
             continue
         free.remove(choice)
         why = "the smallest free berth it fits" + ("" if n_fit > 1 else "; it fits no other berth")
+        if own:
+            why = "the operator reserved it for this ship"
+        elif d is not None and s.call_id in d.priority:
+            why += "; the operator asked to prioritise it"
         out.append((s, choice, why))
     return out
 
