@@ -91,8 +91,8 @@ def ship_from(r: dict) -> Ship:
                 scheduled_eta=_dt(r.get("scheduled_eta")), actual_arrival=_dt(r.get("actual_arrival")),
                 status=str(r.get("status")), berth=r.get("berth") or None,
                 cranes=tuple(r.get("cranes") or ()), trucks=_i(r.get("trucks")),
-                discharge_remaining=_i(r.get("discharge_remaining")),
-                load_remaining=_i(r.get("load_remaining")), departed_at=_dt(r.get("departed_at")))
+                discharge_remaining=_i(r.get("discharge_remaining"), -1),     # -1 = unreadable (YARD-5 fixes)
+                load_remaining=_i(r.get("load_remaining"), -1), departed_at=_dt(r.get("departed_at")))
 
 
 def _equipment_status(text: str) -> tuple[str, Optional[str]]:
@@ -122,7 +122,7 @@ def equipment_from(rows: list[dict]) -> tuple[tuple[Crane, ...], tuple[Truck, ..
 
 
 def block_from(r: dict) -> Block:
-    return Block(str(r.get("block_id")), str(r.get("block_type")), _i(r.get("used")), _i(r.get("slots")))
+    return Block(str(r.get("block_id")), str(r.get("block_type")), _i(r.get("used"), -1), _i(r.get("slots")))
 
 
 def hold_from(r: dict) -> Hold:
