@@ -50,7 +50,7 @@ from core.events import detect_events
 from core.executor import DecisionLog, Executor
 from core.skeleton import SkeletonAgent
 from core.state import build_state, hours
-from core.types import (EQ_AVAILABLE, EV_ANOMALY, SHIP_ARRIVED, SHIP_BERTHED, SHIP_DEPARTED,
+from core.types import (EQ_AVAILABLE, EV_ANOMALY, EV_SHIP_IMPOSSIBLE, EV_SHIP_STALLED, SHIP_ARRIVED, SHIP_BERTHED, SHIP_DEPARTED,
                         SHIP_EXPECTED, SHIP_WORKING, Action, WorldState)
 
 TICK_NORMAL_MIN = 15
@@ -201,9 +201,15 @@ class Loop:
             return []
         events = out.value if isinstance(out.value, list) else []
         for e in events:
-            if getattr(e, "kind", None) == EV_ANOMALY:
-                msg = (getattr(e, "detail", None) or {}).get("message", "")
+            kind = getattr(e, "kind", None)
+            msg = str((getattr(e, "detail", None) or {}).get("message", ""))[:300]
+            if kind == EV_ANOMALY:
                 self._note(state, "state", "anomaly", f"Data anomaly ({e.subject}): {msg}. Logged; the run carries on.")
+            elif kind == EV_SHIP_IMPOSSIBLE:                 # YARD-4: escalated once per ship
+                self._note(state, "stall", "escalate", f"{msg} Safest default taken: it gets no yard slots, so its "
+                           "boxes take no space other ships need, and it is berthed after ships that can finish.")
+            elif kind == EV_SHIP_STALLED:
+                self._note(state, "stall", "ship_stalled", msg)
         return events
 
     def _coordinate(self, state, events, requests, by_agent) -> list[Action]:
