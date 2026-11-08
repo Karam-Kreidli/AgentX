@@ -4,10 +4,12 @@
     if slot.claim("voice"):
         ...one llm.ask(...)
 
-The tick watchdog is 10 s and one call takes ~3 s at p95, so a tick has room for one call.
-The first user to claim a tick gets it; the same user may claim it again (it guards its own
-repeats itself); everyone else gets False and uses their template/fallback. Outside a run
-(no current tick, e.g. in a unit test) every claim succeeds. Never raises.
+The tick watchdog is 10 s and one call takes ~3-4 s (up to the 8 s deadline), so a tick has
+room for exactly one call. The first claim in a tick gets it; every later claim in that tick
+gets False, the same user's included, and uses its template/fallback. (Letting the same user
+claim again let the voice make one call per coordinator round, up to three ~4 s calls in one
+tick: ticks ran past 10 s and the watchdog finished them on rules-only decisions.) Outside a
+run (no current tick, e.g. in a unit test) every claim succeeds. Never raises.
 """
 from __future__ import annotations
 
@@ -25,8 +27,8 @@ def claim(who: str) -> bool:
         return True
     if tick is None:
         return True
-    if _owner["tick"] == tick and _owner["who"] != who:
-        return False
+    if _owner["tick"] == tick:
+        return False                    # this tick's one call is already spent
     _owner.update(tick=tick, who=who)
     return True
 

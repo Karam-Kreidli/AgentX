@@ -83,6 +83,16 @@ def _optional(module: str):
     return importlib.import_module(module)
 
 
+def _reset_llm_users() -> None:
+    """The one-call-per-tick slot, the voice's per-scenario call cap and the supervisor's
+    per-tick memory belong to one run; tick numbers start again at 0 in the next."""
+    for name in ("llm.slot", "llm.voice", "llm.supervisor"):
+        try:
+            importlib.import_module(name).reset()
+        except Exception:
+            pass
+
+
 class Loop:
     def __init__(self, api: Any, run_dir: Path, agents: Optional[list] = None,
                  tick_budget_s: float = TICK_BUDGET_S, max_ticks: int = 100_000,
@@ -99,6 +109,7 @@ class Loop:
         self.tick = 0
         self.prev: Optional[WorldState] = None
         self.rules_only_next = False
+        _reset_llm_users()           # per-run LLM counters start fresh (run.py --all runs many in one process)
         self.counts = {"exceptions": 0, "watchdog": 0, "breaches": 0, "rules_only_ticks": 0,
                        "timeouts": 0, "garbage": 0, "busy_ticks": 0, "clock_retries": 0, "killed": 0}
         self._grant_seen: dict = {}          # (agent, resource, call_id) -> last grant status noted
