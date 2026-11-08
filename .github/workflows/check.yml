@@ -1,0 +1,85 @@
+# SAFE-6: the CI check. The same steps as `bash tools/check.sh`, split into three parallel jobs
+# so the whole check stays under ~5 minutes. Branch protection on main should require the job
+# named "check" (it passes only if all three parts pass).
+#
+# The workbook is private and the repo is public (F8). CI decrypts it from an encrypted copy:
+#   ci/workbooks/team.xlsx.gpg      -> data/P2_Container_Terminal_Data.xlsx           (required)
+#   ci/workbooks/toolkit.xlsx.gpg   -> toolskit/data/P2_Container_Terminal_Data.xlsx  (optional, F14)
+# with the repository secret WORKBOOK_PASSPHRASE. Without them the scorecard and red-team parts
+# fail on purpose: nothing would prove 0 violations.
+#
+# PR label "kpi-regression-explained": fewer ships or a slower turnaround than main becomes a
+# warning (GROUND_RULES §6: the PR must explain why). Violations and crashes always fail.
+name: check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  part:
+    name: ${{ matrix.part }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ["pytest", "scorecard redteam", "honest secrets"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0              # the scorecard re-runs main from git (eval_all.py --against)
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -r requirements.txt
+
+      - name: Workbooks (private, F8)
+        env:
+          WORKBOOK_PASSPHRASE: ${{ secrets.WORKBOOK_PASSPHRASE }}
+        run: |
+          decrypt() {
+            if [ -f "$1" ] && [ -n "$WORKBOOK_PASSPHRASE" ]; then
+              mkdir -p "$(dirname "$2")"
+              gpg --quiet --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+                  --output "$2" --decrypt "$1" <<< "$WORKBOOK_PASSPHRASE"
+              echo "decrypted $1 -> $2"
+            fi
+          }
+          decrypt ci/workbooks/team.xlsx.gpg data/P2_Container_Terminal_Data.xlsx
+          decrypt ci/workbooks/toolkit.xlsx.gpg toolskit/data/P2_Container_Terminal_Data.xlsx
+          if [ ! -f data/P2_Container_Terminal_Data.xlsx ]; then
+            echo "::warning::No workbook: add ci/workbooks/team.xlsx.gpg and the WORKBOOK_PASSPHRASE secret."
+          fi
+
+      - name: bash tools/check.sh ${{ matrix.part }}
+        env:
+          CHECK_BASE: ${{ github.event_name == 'push' && github.event.before || 'origin/main' }}
+          CHECK_ALLOW_KPI_REGRESSION: ${{ contains(github.event.pull_request.labels.*.name, 'kpi-regression-explained') && '1' || '0' }}
+        run: bash tools/check.sh ${{ matrix.part }}
+
+  check:
+    name: check
+    needs: part
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: All parts passed
+        run: |
+          echo "parts: ${{ needs.part.result }}"
+          test "${{ needs.part.result }}" = success
