@@ -18,7 +18,8 @@ Safety:
     quoted data, capped, control characters removed.
   - The sentence may only use numbers that appear in what the model was shown; otherwise the
     chosen option's template is used instead (the choice stands, the wording is ours).
-  - At most one LLM call per tick (the tick watchdog is 10 s; p95 is ~3 s).
+  - At most one LLM call per tick (the tick watchdog is 10 s; p95 is ~3 s), shared with the
+    voice and the operator channel through llm/slot.py.
 
 Every decision also writes one sentence to supervisor_feed.txt (SAFE-3).
 
@@ -36,6 +37,7 @@ from typing import Any, Optional
 from core import log as runlog
 from core.types import SHIP_ARRIVED, SHIP_BERTHED, SHIP_EXPECTED, SHIP_SAILING, SHIP_WORKING
 from llm import client as llm_client
+from llm import slot
 from llm.client import untrusted
 from llm.schemas import REASON_MAX, choice_model
 
@@ -155,7 +157,7 @@ def decide(event, options, state=None) -> tuple[str, str]:
     choice, sentence, backend = first.id, first.template, "rules"
     try:
         tick = runlog.current_tick()
-        if len(options) > 1 and not (tick is not None and tick == _state["tick"]):
+        if len(options) > 1 and not (tick is not None and tick == _state["tick"]) and slot.claim("supervisor"):
             _state["tick"] = tick
             opts = [{"id": o.id, "predicted": dict(o.predicted), "template": o.template} for o in options]
             shown = payload(_question(event), summary(state) if state is not None else None, opts)

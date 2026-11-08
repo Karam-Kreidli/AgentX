@@ -267,7 +267,7 @@ def decide(requests: list[Request], state: WorldState) -> tuple[list[Grant], lis
     if not options:
         options = _plan_options(state)
     if not yard_pending:
-        _transcript(grants)
+        _transcript(grants, use_llm=not options)      # options pending: the supervisor gets the LLM
     return grants, options
 
 
@@ -280,14 +280,26 @@ def _plan_options(state: WorldState) -> list[Option]:
         return []
 
 
-def _transcript(grants: list[Grant]) -> None:
-    """Request + decision lines, only when the status changed for that agent/resource/ship."""
+def _transcript(grants: list[Grant], use_llm: bool = True) -> None:
+    """Request + decision lines, only when the status changed for that agent/resource/ship.
+    Each line gets a sentence from LLM-5 (llm/voice.py): one LLM call for the batch when the
+    tick's LLM slot is free, else templates built from the same fields."""
+    changed = []
     for g in grants:
         r = g.request
         k = (r.agent, r.resource, r.call_id)
-        now = g.status
-        if _mem.logged.get(k) == now:
+        if _mem.logged.get(k) == g.status:
             continue
-        _mem.logged[k] = now
-        runlog.negotiation(r)
-        runlog.negotiation(grant=g)
+        _mem.logged[k] = g.status
+        changed.append(g)
+    if not changed:
+        return
+    items = [x for g in changed for x in (g.request, g)]
+    try:
+        from llm import voice
+        sentences = voice.voice_batch(items, use_llm=use_llm)
+    except Exception:
+        sentences = [None] * len(items)
+    for k, g in enumerate(changed):
+        runlog.negotiation(g.request, sentence=sentences[2 * k] or None)
+        runlog.negotiation(grant=g, sentence=sentences[2 * k + 1] or None)
