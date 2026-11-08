@@ -50,7 +50,7 @@ from core.events import detect_events
 from core.executor import DecisionLog, Executor
 from core.skeleton import SkeletonAgent
 from core.state import build_state, hours
-from core.types import (EQ_AVAILABLE, EV_ANOMALY, EV_SHIP_IMPOSSIBLE, EV_SHIP_STALLED, SHIP_ARRIVED, SHIP_BERTHED, SHIP_DEPARTED,
+from core.types import (EQ_AVAILABLE, EV_ANOMALY, EV_OPERATOR_MESSAGE, EV_SHIP_IMPOSSIBLE, EV_SHIP_STALLED, SHIP_ARRIVED, SHIP_BERTHED, SHIP_DEPARTED,
                         SHIP_EXPECTED, SHIP_WORKING, Action, WorldState)
 
 TICK_NORMAL_MIN = 15
@@ -101,6 +101,7 @@ class Loop:
         self.counts = {"exceptions": 0, "watchdog": 0, "breaches": 0, "rules_only_ticks": 0,
                        "timeouts": 0, "garbage": 0, "busy_ticks": 0, "clock_retries": 0, "killed": 0}
         self._grant_seen: dict = {}          # (agent, resource, call_id) -> last grant status noted
+        self.operator_queue: list[str] = []   # LLM-6: operator messages not handled yet (one per tick)
         # SAFE-4
         self.calls = safety.Guarded(kill_after_s=kill_after_s)
         self.call_timeout_s = call_timeout_s or safety.call_timeout_s()
@@ -210,7 +211,42 @@ class Loop:
                            "boxes take no space other ships need, and it is berthed after ships that can finish.")
             elif kind == EV_SHIP_STALLED:
                 self._note(state, "stall", "ship_stalled", msg)
+            elif kind == EV_OPERATOR_MESSAGE:
+                self.operator_queue.append(str((getattr(e, "detail", None) or {}).get("text", ""))[:500])
+        self._operator(state)
         return events
+
+    def _operator(self, state) -> None:
+        """LLM-6: the oldest operator message, translated, checked against our rules, applied or
+        refused (refusals escalated). One per tick: the LLM call fits in a tick once."""
+        if not self.operator_queue:
+            return
+        op = _optional("llm.operator")
+        if op is None:
+            text = self.operator_queue.pop(0)
+            self._note(state, "operator", "escalate", f"Operator message not handled (no operator channel): "
+                       f"{text[:200]!r}. Safest default taken: nothing was changed.")
+            return
+        text = self.operator_queue[0]
+        out = self._call(state, "operator", "operator.handle", op.handle, text, state)
+        if not out.ok:
+            self.operator_queue.pop(0)
+            self._fault(state, "operator", out, "the message was not acted on.")
+            self._note(state, "operator", "escalate", f"Operator message could not be handled: {text[:200]!r}. "
+                       "Safest default taken: nothing was changed.")
+            return
+        r = out.value
+        if getattr(r, "status", None) == "deferred":
+            return                                           # the LLM slot is taken: next tick
+        self.operator_queue.pop(0)
+        cmd = getattr(r, "command", None)
+        saw = {"message": text[:200], "command": getattr(cmd, "kind", None), "ship": getattr(cmd, "ship", None),
+               "berth": getattr(cmd, "berth", None)}
+        if getattr(r, "status", None) == "accepted":
+            self._note(state, "operator", f"command:{cmd.kind}", r.reply, saw)
+        else:
+            self._note(state, "operator", "escalate", f"Operator message refused: {r.reply} "
+                       f"Safest default taken: nothing was changed.", saw)
 
     def _coordinate(self, state, events, requests, by_agent) -> list[Action]:
         """CORE-5 coordinator and LLM-4 supervisor. When the coordinator offers options, the
