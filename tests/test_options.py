@@ -102,7 +102,9 @@ def test_ship_that_fits_only_this_berth_is_offered():
     st = only_fits_world()
     opts = O.build(st)
     assert opts and opts[0].predicted["ship"] == "MID"
-    assert [o.id for o in opts] == ["berth_agent_plan", "oldest_first", "only_fits_here"]
+    # With the cranes shared the crane agent's way (not 2 per berth), oldest-first changes the
+    # average finish by < MIN_GAIN_H (15.7 h vs 16.4 h), so it is no longer worth offering.
+    assert [o.id for o in opts] == ["berth_agent_plan", "only_fits_here"]
     assert "only_fits_here" in [o.id for o in opts] and all(O.rule_safe(o, st)[0] for o in opts)
 
 

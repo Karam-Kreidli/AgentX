@@ -21,8 +21,9 @@ Rules every option follows:
 Berth choice (on): a berth is free and more arrived ships fit it than there are free berths
 for them. Option 0 = the berth agent's own choice (BERTH-2: least work first, best fit);
 alternatives = the oldest arrival, and a ship that fits only this berth. Predicted effects
-come from a small crane-time model (FIXED_CRANES cranes at CRANE_RATE moves/h each, berths freeing as ships
-finish); yard space is not modelled, and the template says so.
+come from a small crane-time model: the cranes in service shared among the ships at berth the way
+the crane agent shares them (agents/crane.py split()), CRANE_RATE moves/h each, berths freeing as
+ships finish; yard space is not modelled, and the template says so.
 
 Crane choice (CRANE_OPTIONS = False, stays off): a ship at berth has cranes but can't
 discharge (waiting for yard space) while another berthed ship can work. Option 0 = keep the
@@ -40,7 +41,7 @@ from core.types import (EQ_AVAILABLE, EQ_WORKING, SHIP_ARRIVED, SHIP_BERTHED, SH
 
 AGENT = "options"
 CRANE_RATE = 23.0            # moves/h per crane at full trucks (same as YARD-3)
-FIXED_CRANES = 2             # cranes per berth under today's fixed split
+PREDICT_STEP_H = 0.25        # berth-option model step (one normal tick)
 WORK_DELAY_H = 1.0           # work starts ~1 h after berthing
 SAIL_DELAY_H = 1.0           # a ship sails ~1 h after its last move
 MIN_GAIN_H = 1.0             # an alternative must change the outcome by at least this much
@@ -91,42 +92,61 @@ def rule_safe(option: Option, state: WorldState) -> tuple[bool, str]:
 # berth choice
 # --------------------------------------------------------------------------
 
-def _work_h(ship) -> float:
-    return WORK_DELAY_H + ship.remaining_moves / (FIXED_CRANES * CRANE_RATE) + SAIL_DELAY_H
-
-
 def _hours(state, when) -> float:
     return (when - state.now).total_seconds() / 3600
 
 
-def _berth_free_at(state: WorldState) -> dict[str, float]:
-    """Hours from now until each berth is free (0 if free now), by crane time."""
-    free = {b.berth_id: 0.0 for b in state.berths}
-    for s in state.ships:
-        if s.berth in free and s.status in BUSY:
-            free[s.berth] = max(free[s.berth], SAIL_DELAY_H + s.remaining_moves / (FIXED_CRANES * CRANE_RATE))
-    return free
-
-
 def _predict(state: WorldState, first, berth_id: str, waiting: list) -> dict:
     """Finish times (hours from now) of the waiting ships if `first` takes `berth_id` now and
-    the rest follow in the berth agent's order onto whichever berth they fit frees first."""
-    free = _berth_free_at(state)
-    finish = {}
-    free[berth_id] = _work_h(first)
-    finish[first.call_id] = free[berth_id]
-    for s in waiting:
-        if s.call_id == first.call_id:
-            continue
-        fits = [b.berth_id for b in state.berths if b.fits(s.loa_m, s.draft_m)]
-        if not fits:
-            continue
-        b = min(fits, key=lambda x: (free[x], x))
-        start = free[b]
-        free[b] = start + _work_h(s)
-        finish[s.call_id] = free[b]
-    left = _hours(state, state.scenario_end)
-    done = sum(1 for h in finish.values() if h <= left)
+    the rest follow in the berth agent's order onto whichever fitting berth frees first.
+
+    A small time-step model: the cranes in service are shared among the ships at berth the way
+    the crane agent shares them (agents/crane.py split(): one each, spare cranes to the shortest
+    job), CRANE_RATE moves/h each; work starts WORK_DELAY_H after berthing, a ship sails
+    SAIL_DELAY_H after its last move. Yard space is not modelled (the template says so)."""
+    from agents import crane as crane_model
+    n = crane_model.in_service(state)
+    left = {}                                        # call_id -> moves left
+    start = {}                                       # call_id -> hours from now when cranes may work
+    berth_of = {}
+    for s in state.ships:                            # ships already at a berth
+        if s.berth and s.status in BUSY:
+            left[s.call_id] = max(0, s.remaining_moves)
+            start[s.call_id] = 0.0
+            berth_of[s.call_id] = s.berth
+    left[first.call_id], start[first.call_id], berth_of[first.call_id] = \
+        max(0, first.remaining_moves), WORK_DELAY_H, berth_id
+    queue = [s for s in waiting if s.call_id != first.call_id and
+             any(b.fits(s.loa_m, s.draft_m) for b in state.berths)]
+    finish: dict = {}
+    sailed: dict = {}
+    t, step, horizon = 0.0, PREDICT_STEP_H, max(1.0, _hours(state, state.scenario_end)) + 48.0
+    while t < horizon and (queue or any(k not in sailed for k in left)):
+        busy = {berth_of[k] for k in left if k not in sailed or sailed[k] > t}
+        for s in list(queue):                        # next ships onto berths that are free now
+            b = next((x.berth_id for x in state.berths if x.berth_id not in busy and x.fits(s.loa_m, s.draft_m)), None)
+            if b is None:
+                continue
+            queue.remove(s)
+            busy.add(b)
+            left[s.call_id], start[s.call_id], berth_of[s.call_id] = max(0, s.remaining_moves), t + WORK_DELAY_H, b
+        active = {k: max(0.0, min(step, t + step - start[k])) for k in left if k not in sailed}
+        work = {k: (left[k] if active[k] > 0 else 0) for k in active}
+        cranes = crane_model.split(work, left, n, step, CRANE_RATE)
+        for k in active:
+            if k in sailed:
+                continue
+            left[k] -= min(left[k], CRANE_RATE * cranes.get(k, 0) * active[k])
+            if left[k] <= 0 and start[k] <= t + step:
+                sailed[k] = t + step + SAIL_DELAY_H
+        t += step
+    for k, at in sailed.items():
+        finish[k] = at
+    finish = {k: v for k, v in finish.items() if k == first.call_id or k in {s.call_id for s in waiting}}
+    for s in [first] + list(waiting):                # not finished within the model horizon
+        finish.setdefault(s.call_id, horizon)
+    window = _hours(state, state.scenario_end)
+    done = sum(1 for h in finish.values() if h <= window)
     return {"finish_h": {k: round(v, 1) for k, v in finish.items()},
             "ships_finishing_in_window": done,
             "avg_finish_h": round(sum(finish.values()) / len(finish), 1) if finish else 0.0}

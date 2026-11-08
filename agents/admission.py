@@ -12,9 +12,11 @@ How (only what the tools show at the current time; no workbook, no hidden data):
 
 1. Model. A small forward simulation of the terminal from the current snapshot to the end of
    the window, in STEP_H-hour steps: ships arrive (actual arrival, else scheduled ETA), take the
-   first free berth they fit, get DEFAULT_CRANES cranes at CRANE_RATE moves/h, place their
-   imports in the yard (IMDG -> H, reefer -> I/J, dry -> A-G then I/J) as space allows,
-   discharge only what is placed, then load and sail.
+   first free berth they fit, place their imports in the yard (IMDG -> H, reefer -> I/J,
+   dry -> A-G then I/J) as space allows, discharge only what is placed, then load and sail.
+   Cranes (CRANE_RATE moves/h each) are shared among the ships at berth the way the crane
+   agent shares them (agents/crane.py split(): one each for every ship with work it can reach,
+   spare ones to the shortest job), not a fixed number per berth.
 2. Yard forecast. Import boxes leave the yard some days after they are placed (customs-held
    ones stay). Per-box dwell is hidden, so the model assumes a uniform DWELL_MIN_D..DWELL_MAX_D
    days (+6 h) from when the box was first seen in the yard, and scales future releases by the
@@ -38,6 +40,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional
 
+from agents import crane as crane_model
+
 from core.types import (BLOCK_IMDG, BLOCK_REEFER, CARGO_DRY, CARGO_IMDG, CARGO_REEFER, SHIP_ARRIVED,
                         SHIP_BERTHED, SHIP_EXPECTED, SHIP_SAILING, SHIP_WORKING, WorldState)
 
@@ -46,11 +50,11 @@ DWELL_MIN_D = 2.0          # earliest a placed import box leaves, days after pla
 DWELL_MAX_D = 8.0          # latest
 RELEASE_DELAY_H = 6.0      # the simulator adds 6 h to the dwell
 CRANE_RATE = 23.0          # moves/h per crane at full trucks (rated ~27 x 0.85)
-DEFAULT_CRANES = 2         # cranes per berth (fixed split until CRANE-2)
 WORK_DELAY_H = 1.0         # work starts 1 h after berthing
 SAIL_DELAY_H = 1.0         # a ship sails 1 h after its last move
 STEP_H = 1.0               # model resolution
-REPLAN_H = 1.0             # re-plan at least this often, and whenever a ship's status/berth/cranes change
+REPLAN_H = 1.0             # re-plan at least this often, and whenever a ship's status/berth changes
+REPLAN_SLOTS = 50          # ... or a yard group's free space moves by this many slots
 
 G_IMDG, G_REEFER, G_DRY = "imdg", "reefer", "dry"
 GROUPS = (G_IMDG, G_REEFER, G_DRY)
@@ -215,20 +219,40 @@ def _ships(state: WorldState) -> tuple[list[_Ship], dict, list[str]]:
         out.append(_Ship(
             s.call_id, i, hours(arrive), s.loa_m, s.draft_m, s.berth if at_berth else None,
             0.0 if s.status in (SHIP_WORKING, SHIP_SAILING) else (WORK_DELAY_H if at_berth else 0.0),
-            len(s.cranes) or DEFAULT_CRANES, need, max(0, placed - done), s.discharge_remaining,
+            len(s.cranes), need, max(0, placed - done), s.discharge_remaining,
             s.load_remaining, sail_h=(SAIL_DELAY_H if s.status == SHIP_SAILING else None)))
     return out, reasons, impossible
 
 
 def _cohorts(state: WorldState) -> list[tuple[float, str, float]]:
-    """Boxes in the yard grouped by (hour first seen, group): (start hours from now, group, count)."""
+    """Boxes still in the yard, grouped by (hour first seen, group): (start hours from now, group, count).
+
+    The manifest keeps a box's yard block after the box has left, so departures can't be seen
+    one by one, only as a count per group (_mem.released). That many boxes are taken off the
+    oldest end of each group (the dwell prior has older boxes leave first), so a box that has
+    already gone is not released a second time in the forecast. Held boxes stay."""
     held = state.held_ids()
-    buckets: dict = {}
+    per_group: dict = {g: [] for g in GROUPS}
     for cid, (t0, g) in _mem.seen_at.items():
         if cid not in held:
+            per_group[g].append(t0)
+    buckets: dict = {}
+    for g, times in per_group.items():
+        times.sort()
+        for t0 in times[min(len(times), _mem.released[g]):]:
             k = (round((t0 - state.now).total_seconds() / 3600, 2), g)
             buckets[k] = buckets.get(k, 0) + 1
     return [(start, g, float(n)) for (start, g), n in buckets.items()]
+
+
+def _released_share(start: float, x: float, cal: float) -> float:
+    """Share of a cohort still in the yard now (or placed at `start` > 0 in the model) that has left
+    by model time x: the dwell prior conditioned on not having left yet, scaled by the observed
+    calibration, never more than all of it."""
+    f0 = _left_by(max(0.0, -start))
+    if f0 >= 1.0:
+        return 1.0 if x > 0 else 0.0                # overdue by the prior: assume it leaves in the first step
+    return min(1.0, cal * (_left_by(x - start) - f0) / (1.0 - f0))
 
 
 def _simulate(state: WorldState, skip: frozenset, horizon_h: float, cal: dict) -> tuple[set, dict]:
@@ -236,6 +260,7 @@ def _simulate(state: WorldState, skip: frozenset, horizon_h: float, cal: dict) -
     ships, _, _ = _ships(state)
     ships = [s for s in ships if s.call_id not in skip]
     occupied = {s.berth: s.call_id for s in ships if s.berth}
+    n_cranes = crane_model.in_service(state)
     free = {g: 0.0 for g in GROUPS}
     for b in state.blocks:
         free[_group_of_block(b.block_type)] += b.free
@@ -245,10 +270,9 @@ def _simulate(state: WorldState, skip: frozenset, horizon_h: float, cal: dict) -
     while t < horizon_h:
         t1 = t + STEP_H
         for start, g, n in cohorts:                                  # yard releases in (t, t1]
-            a = t - start
-            if a + STEP_H <= RELEASE_DELAY_H + DWELL_MIN_D * 24 or a >= RELEASE_DELAY_H + DWELL_MAX_D * 24:
+            if t1 <= start:
                 continue
-            free[g] += n * cal[g] * (_left_by(t1 - start) - _left_by(a))
+            free[g] += n * (_released_share(start, t1, cal[g]) - _released_share(start, max(t, start), cal[g]))
         for s in sorted(ships, key=lambda x: (x.arrive_h, x.order)):  # berthing, arrival order
             if s.berth or s.sail_h is not None or s.arrive_h > t:
                 continue
@@ -275,10 +299,19 @@ def _simulate(state: WorldState, skip: frozenset, horizon_h: float, cal: dict) -
             s.need[G_REEFER] -= n_r
             s.need[G_DRY] -= n_d1 + n_d2
             s.placed_waiting += n_i + n_r + n_d1 + n_d2
-        for s in ships:                                              # cranes: discharge placed, then load
+        work, left, avail = {}, {}, {}                                # cranes: shared the crane agent's way
+        for s in ships:
             if not s.berth or s.sail_h is not None:
                 continue
-            cap = CRANE_RATE * s.cranes * max(0.0, t1 - max(t, s.work_from_h))
+            avail[s.call_id] = max(0.0, t1 - max(t, s.work_from_h))
+            reach = s.discharge + s.load if s.placed_waiting >= s.discharge else s.placed_waiting
+            work[s.call_id] = reach if avail[s.call_id] > 0 else 0
+            left[s.call_id] = s.discharge + s.load
+        cranes = crane_model.split(work, left, n_cranes, STEP_H, CRANE_RATE)
+        for s in ships:                                              # discharge placed, then load
+            if not s.berth or s.sail_h is not None:
+                continue
+            cap = CRANE_RATE * cranes.get(s.call_id, 0) * avail.get(s.call_id, 0.0)
             d = int(min(cap, s.discharge, s.placed_waiting))
             s.discharge -= d
             s.placed_waiting -= d
@@ -300,7 +333,14 @@ def _simulate(state: WorldState, skip: frozenset, horizon_h: float, cal: dict) -
 def plan(state: WorldState) -> Bound:
     """The admission plan for this snapshot (cached per snapshot time)."""
     _observe(state)
-    sig = tuple((s.call_id, s.status, s.berth, len(s.cranes)) for s in state.ships)
+    free = {g: 0 for g in GROUPS}
+    for b in state.blocks:
+        free[_group_of_block(b.block_type)] += b.free
+    # Re-plan on a ship's status or berth, the cranes in service, the boxes on hold, or a yard group's
+    # free space moving by REPLAN_SLOTS; otherwise at most every REPLAN_H. (Crane counts per ship
+    # are not in the key: the model shares the cranes itself, as the crane agent does.)
+    sig = (tuple((s.call_id, s.status, s.berth) for s in state.ships), crane_model.in_service(state),
+           len(state.held_ids()), tuple(free[g] // REPLAN_SLOTS for g in GROUPS))
     if _mem.cache and _mem.cache[1] == sig and \
             timedelta(0) <= state.now - _mem.cache[0] < timedelta(hours=REPLAN_H):
         return _mem.cache[2]

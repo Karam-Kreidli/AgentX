@@ -306,3 +306,43 @@ class CraneAgent:
             return f"{cid} releases its cranes: {what}. " + a.reason
         return (f"{cid} gets {n} crane{'s' if n != 1 else ''} (it can keep {need.get(cid, n)} busy; "
                 f"{s.discharge_remaining} to discharge, {s.load_remaining} to load). " + a.reason)
+
+
+# --------------------------------------------------------------------------- capacity model
+# The same split policy as allocate(), without the rail geometry, for forecasts that look
+# hours ahead: YARD-3's yard forecast (agents/admission.py) and BC-3's berth options
+# (agents/options.py). One place, so the forecasts can't drift from what the crane agent does.
+
+def split(work: Mapping[str, float], left: Mapping[str, float], n_cranes: int, step_h: float,
+          rate: float = RATE) -> dict[str, int]:
+    """Cranes per ship for one step of `step_h` hours, the crane agent's way.
+
+    work: moves each ship could make in this step (boxes it can reach); left: its total moves
+    left (shortest job gets the spare cranes). Each ship with work first gets one crane, then
+    spare cranes go to the ship with the least left, up to what its work keeps busy (at most
+    MAX_PER_SHIP). Ships with no work get none."""
+    want = {k: min(MAX_PER_SHIP, math.ceil(w / (rate * step_h))) for k, w in work.items() if w > 0}
+    out = {k: 0 for k in work}
+    free = max(0, int(n_cranes))
+    order = sorted(want, key=lambda k: (left.get(k, 0), k))
+    for k in order:                                     # one each first: nobody with work starves
+        if free <= 0:
+            break
+        out[k], free = 1, free - 1
+    for k in order:                                     # then shortest job first
+        extra = min(free, want[k] - out[k])
+        if extra > 0:
+            out[k] += extra
+            free -= extra
+    return out
+
+
+RAIL_CRANES = 6         # quay cranes on the rail (static reference data)
+
+
+def in_service(state: WorldState) -> int:
+    """Cranes that can work (not out of service). A snapshot that lists no cranes at all (a
+    failed read, a hand-made test world) counts the six on the rail."""
+    if not state.cranes:
+        return RAIL_CRANES
+    return sum(1 for c in state.cranes if c.status != EQ_OUT_OF_SERVICE)
