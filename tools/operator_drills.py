@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT))
 
 from core.state import build_state          # noqa: E402
 from llm import operator                    # noqa: E402
+from llm import client as llm_client        # noqa: E402
 from llm.client import load_dotenv          # noqa: E402
 from vendor import TerminalAPI              # noqa: E402
 
@@ -29,6 +30,7 @@ def main() -> int:
         print(f"workbook not found: {DATA}")
         return 2
     load_dotenv()
+    llm_client.warmup()          # first connection to the VM, outside the drills' 8 s calls
     with tempfile.TemporaryDirectory() as tmp:
         api = TerminalAPI(SCENARIO, data_xlsx=str(DATA), log_path=str(Path(tmp) / "actions.jsonl"))
         rows = operator.run_drills(build_state(api))
