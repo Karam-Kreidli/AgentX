@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from agents.berth import BerthAgent  # noqa: E402
+from agents.crane import CraneAgent  # noqa: E402
 from agents.trucks import TruckAgent  # noqa: E402
 from agents.yard import YardAgent  # noqa: E402
 from core.loop import Loop  # noqa: E402
@@ -37,7 +38,7 @@ def make_agents(kind: str) -> list:
     covers the jobs no real agent does yet. 'skeleton' is the rules-only baseline."""
     if kind == "skeleton":
         return [SkeletonAgent()]
-    return [BerthAgent(), SkeletonAgent(parts=("cranes",)), TruckAgent(), YardAgent()]
+    return [BerthAgent(), CraneAgent(), TruckAgent(), YardAgent()]
 
 
 def run_one(scenario: str, data: Path, key: Path | None, runs: Path, agent: str = "multi") -> dict:
@@ -100,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--runs", type=Path, default=ROOT / "runs", help="output folder (default: runs/)")
     p.add_argument("--no-llm", action="store_true", help="rules only: never call a language model")
     p.add_argument("--agent", choices=["multi", "skeleton"], default="multi",
-                   help="multi: berth, truck and yard agents (skeleton covers cranes); skeleton: rules-only")
+                   help="multi: berth, crane, truck and yard agents; skeleton: rules-only")
     a = p.parse_args(argv)
 
     if not a.data.exists():

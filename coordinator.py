@@ -43,7 +43,7 @@ from typing import Optional
 
 from core import log as runlog
 from core.types import (BLOCK_EMPTY, BLOCK_IMDG, BLOCK_REEFER, BLOCK_STANDARD, CARGO_DRY, CARGO_IMDG,
-                        CARGO_REEFER, EQ_AVAILABLE, GRANTED, KNOWN_CARGO, REFUSED, RES_BERTH, RES_CRANES,
+                        CARGO_REEFER, EQ_AVAILABLE, EQ_OUT_OF_SERVICE, GRANTED, KNOWN_CARGO, REFUSED, RES_BERTH, RES_CRANES,
                         RES_TRUCKS, RES_YARD_SLOTS, TRIMMED, Grant, Option, Request, WorldState)
 
 OPT_FORECAST = "follow_forecast"
@@ -261,9 +261,8 @@ def decide(requests: list[Request], state: WorldState) -> tuple[list[Grant], lis
         elif res == RES_TRUCKS:
             g = _pool(reqs, sum(1 for t in state.trucks if t.status == EQ_AVAILABLE and not t.call_id),
                       "trucks", order)
-        elif res == RES_CRANES:
-            g = _pool(reqs, sum(1 for c in state.cranes if c.status == EQ_AVAILABLE and not c.call_id),
-                      "cranes", order)
+        elif res == RES_CRANES:            # CRANE-2 re-splits every in-service crane each round
+            g = _pool(reqs, sum(1 for c in state.cranes if c.status != EQ_OUT_OF_SERVICE), "cranes", order)
         elif res == RES_BERTH:
             g = _berths(reqs, state, order)
         else:
