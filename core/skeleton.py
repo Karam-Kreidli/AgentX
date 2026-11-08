@@ -134,21 +134,28 @@ class SkeletonAgent:
 
     # ------------------------------------------------------------ cranes
     def _cranes(self, state: WorldState) -> list[Action]:
-        out = []
+        """Each berthed ship gets its berth's fixed cranes (skipping broken ones). The moves are
+        planned with safe_crane_moves (CRANE-1) from wherever the cranes are now, so this stays
+        rail-safe even when another agent (CRANE-2) left them elsewhere; from the home bays it
+        gives the same layout as the fixed split always did."""
+        from agents.crane_moves import plans_from_state, safe_crane_moves
         broken = {c.crane_id for c in state.cranes if c.status == EQ_OUT_OF_SERVICE}
-        for s in state.ships:
-            if s.status not in (SHIP_BERTHED, SHIP_WORKING):
-                continue
-            split = CRANE_SPLIT.get(s.berth, ())
-            want = [(c, bay) for c, bay in split if c not in broken]
-            if not want or sorted(s.cranes) == sorted(c for c, _ in want):
-                continue
+        at = [s for s in state.ships if s.status in (SHIP_BERTHED, SHIP_WORKING) and s.berth in CRANE_SPLIT]
+        want = {s.call_id: {c: bay for c, bay in CRANE_SPLIT[s.berth] if c not in broken} for s in at}
+        if all(sorted(s.cranes) == sorted(want[s.call_id]) and
+               all(state.crane(c) is not None and state.crane(c).bay == b for c, b in want[s.call_id].items())
+               for s in at):
+            return []
+        pos, brk, target = plans_from_state(state, want)
+        out = []
+        for a in safe_crane_moves(pos, brk, target):
+            s = state.ship(a.args["call_id"])
+            split = CRANE_SPLIT.get(s.berth, ()) if s else ()
             skipped = [c for c, _ in split if c in broken]
-            reason = (f"{s.call_id} on {s.berth} gets that berth's fixed cranes "
-                      f"{', '.join(c for c, _ in want)}"
-                      + (f" ({', '.join(skipped)} out of service, skipped)" if skipped else "") + ".")
-            out.append(Action(TOOL_PLAN_CRANES, {"call_id": s.call_id, "crane_ids": [c for c, _ in want],
-                                                 "bay_positions": [bay for _, bay in want]}, AGENT, reason))
+            reason = (f"{a.args['call_id']} on {s.berth if s else '?'} gets that berth's fixed cranes "
+                      f"{', '.join(c for c, _ in split if c not in broken)}"
+                      + (f" ({', '.join(skipped)} out of service, skipped)" if skipped else "") + ". " + a.reason)
+            out.append(Action(a.tool, a.args, AGENT, reason))
         return out
 
     # ------------------------------------------------------------ trucks

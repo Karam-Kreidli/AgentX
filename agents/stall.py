@@ -48,6 +48,7 @@ _mem = _Memory()
 def reset() -> None:
     global _mem
     _mem = _Memory()
+    _counted.clear()
 
 
 def _scenario(state: WorldState) -> None:
@@ -59,11 +60,20 @@ def _scenario(state: WorldState) -> None:
         _mem.first_discharge.setdefault(s.call_id, s.discharge_remaining)
 
 
+_counted: dict = {}                            # call_id -> (manifest rows object, counts)
+
+
 def _imports(state: WorldState, call_id: str) -> tuple[int, int, dict]:
-    """(import boxes in the manifest, placed in the yard, unplaced per known cargo type)."""
+    """(import boxes in the manifest, placed in the yard, unplaced per known cargo type).
+    Counted once per snapshot's manifest rows (the same rows object means the same counts)."""
+    rows = state.manifests.get(call_id, ())
+    hit = _counted.get(call_id)
+    if hit is not None and hit[0] is rows:
+        total, placed, unplaced = hit[1]
+        return total, placed, dict(unplaced)
     total = placed = 0
     unplaced = {CARGO_IMDG: 0, CARGO_REEFER: 0, CARGO_DRY: 0}
-    for c in state.manifests.get(call_id, ()):
+    for c in rows:
         if c.direction != "import":
             continue
         total += 1
@@ -71,6 +81,7 @@ def _imports(state: WorldState, call_id: str) -> tuple[int, int, dict]:
             placed += 1
         elif c.cargo_type in KNOWN_CARGO:
             unplaced[c.cargo_type] += 1
+    _counted[call_id] = (rows, (total, placed, dict(unplaced)))
     return total, placed, unplaced
 
 

@@ -24,11 +24,11 @@ alternatives = the oldest arrival, and a ship that fits only this berth. Predict
 come from a small crane-time model (FIXED_CRANES cranes at CRANE_RATE moves/h each, berths freeing as ships
 finish); yard space is not modelled, and the template says so.
 
-Crane choice (off until CRANE-2, CRANE_OPTIONS = False): a ship at berth has cranes but can't
+Crane choice (CRANE_OPTIONS = False, stays off): a ship at berth has cranes but can't
 discharge (waiting for yard space) while another berthed ship can work. Option 0 = keep the
-cranes; option 1 = move them to the working ship through safe_crane_moves (CRANE-1). Off
-because today the skeleton keeps a fixed crane split per berth and would move them straight
-back; CRANE-2 replaces that split and switches this on.
+cranes; option 1 = move them to the working ship through safe_crane_moves (CRANE-1). Since
+CRANE-2 (agents/crane.py) the crane agent makes this call itself every tick: a stalled ship
+gets no cranes, so "keep" is never the agents' plan and the choice no longer competes.
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ FIXED_CRANES = 2             # cranes per berth under today's fixed split
 WORK_DELAY_H = 1.0           # work starts ~1 h after berthing
 SAIL_DELAY_H = 1.0           # a ship sails ~1 h after its last move
 MIN_GAIN_H = 1.0             # an alternative must change the outcome by at least this much
-CRANE_OPTIONS = False        # switched on by CRANE-2 (see module docstring)
+CRANE_OPTIONS = False        # stays off: CRANE-2 decides this itself (see module docstring)
 BUSY = (SHIP_BERTHED, SHIP_WORKING, SHIP_SAILING)
 
 

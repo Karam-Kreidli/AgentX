@@ -209,10 +209,12 @@ def test_trucks_go_to_working_ships_first_then_arrival_order():
 
 
 def test_cranes_and_berths_are_granted_from_what_is_free():
-    cranes = [Crane("QC1", "available", None, 1), Crane("QC2", "working", "S1", 5)]
+    # CRANE-2 re-splits every in-service crane each round: cranes on ships count, broken ones don't
+    cranes = [Crane("QC1", "available", None, 1), Crane("QC2", "working", "S1", 5),
+              Crane("QC3", "out_of_service", None, 27)]
     st = world([ship("S1"), ship("S2", None, "arrived", order_eta=1)], [], cranes=cranes)
-    g = C.decide([Request("berth", "cranes", 2, "S1", 1.0, "x"), Request("berth", "berth", 1, "S2", 1.0, "y")], st)[0]
-    assert {(x.request.resource, x.status, x.granted) for x in g} == {("cranes", TRIMMED, 1), ("berth", GRANTED, 1)}
+    g = C.decide([Request("berth", "cranes", 3, "S1", 1.0, "x"), Request("berth", "berth", 1, "S2", 1.0, "y")], st)[0]
+    assert {(x.request.resource, x.status, x.granted) for x in g} == {("cranes", TRIMMED, 2), ("berth", GRANTED, 1)}
 
 
 def test_unknown_resource_is_refused_not_crashed():
