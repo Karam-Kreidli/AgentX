@@ -56,6 +56,7 @@ from core.types import (EQ_AVAILABLE, EV_ANOMALY, EV_OPERATOR_MESSAGE, EV_SHIP_I
 TICK_NORMAL_MIN = 15
 TICK_BUSY_MIN = 5
 TICK_BUDGET_S = 10.0          # watchdog: wall-clock seconds per tick before falling back to rules-only
+BAD_DATA = "Bad data: "          # YARD-5 (core/validate.py) sentences start with this
 MAX_ROUNDS = 3                # propose/execute rounds per tick
 FIRST_SNAPSHOT_TRIES = 5      # SAFE-4: a failed first read is retried, not taken as the end of the run
 _FAULT_COUNTS = {safety.EXCEPTION: "exceptions", safety.TIMEOUT: "timeouts", safety.GARBAGE: "garbage"}
@@ -190,8 +191,17 @@ class Loop:
         st = build_state(self.api)
         for a in st.anomalies:
             if a not in before.anomalies:
-                self._note(st, "state", "anomaly", f"Re-read: {a}. Logged; the run carries on.")
+                self._anomaly(st, str(a)[:300], "Re-read: ")
         return st
+
+    def _anomaly(self, state, msg: str, prefix: str = "") -> None:
+        """YARD-5 findings ('Bad data: ... Safest default taken: ...') are escalated; other data
+        anomalies (failed reads, bad rows) are logged."""
+        if msg.startswith(BAD_DATA):
+            self._note(state, "validate", "escalate", msg)
+        else:
+            self._note(state, "state", "anomaly", f"{prefix}{msg}. Logged; the run carries on." if prefix else
+                       f"Data anomaly (validation): {msg}. Logged; the run carries on.")
 
     def _events(self, state):
         """detect_events with a hard timeout; data anomalies (failed reads, bad rows) are logged."""
@@ -205,7 +215,7 @@ class Loop:
             kind = getattr(e, "kind", None)
             msg = str((getattr(e, "detail", None) or {}).get("message", ""))[:300]
             if kind == EV_ANOMALY:
-                self._note(state, "state", "anomaly", f"Data anomaly ({e.subject}): {msg}. Logged; the run carries on.")
+                self._anomaly(state, msg)
             elif kind == EV_SHIP_IMPOSSIBLE:                 # YARD-4: escalated once per ship
                 self._note(state, "stall", "escalate", f"{msg} Safest default taken: it gets no yard slots, so its "
                            "boxes take no space other ships need, and it is berthed after ships that can finish.")
