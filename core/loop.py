@@ -46,6 +46,7 @@ from typing import Any, Optional
 
 from core import log as runlog
 from core import safety
+from core.explain import Explainer
 from core.events import detect_events
 from core.executor import DecisionLog, Executor
 from core.skeleton import SkeletonAgent
@@ -123,6 +124,7 @@ class Loop:
         self.llm_switched = False
         self.stopped: Optional[str] = None       # why the run ended early, if it did
         self.clock_now = None                    # simulator time after the last successful advance
+        self.explain = Explainer()               # review: one feed sentence per re-plan, why ships did not finish
 
     # ------------------------------------------------------------------ helpers
     def _note(self, state, agent, choice, reason, saw=None):
@@ -378,6 +380,8 @@ class Loop:
         t0 = time.perf_counter()
         state = build_state(self.api)
         runlog.tick_snapshot(self.tick, state)          # SAFE-3: ticks.jsonl for the timeline
+        self.explain.observe(state)
+        before = state
         events = self._events(state)
         self.prev = state
         self.ex.tick = self.tick
@@ -421,6 +425,9 @@ class Loop:
                 break
             state = self._reread(state)
 
+        sentence = self.explain.replan(before, state)
+        if sentence:
+            runlog.feed(sentence, tick=self.tick, t=hours(state))
         self._invariants(state)
         return state
 
@@ -532,6 +539,11 @@ class Loop:
                           for v in st.ships if v.actual_arrival]
                 s["honest_turnaround_h"] = round(sum(honest) / len(honest), 2) if honest else None
                 s["unfinished_calls"] = [v.call_id for v in st.ships if v.status != SHIP_DEPARTED]
+                why = self.explain.unfinished(st)
+                if why:
+                    s["unfinished_why"] = why
+                    lines = ["# Why these ships did not finish", ""] + [f"- {w}" for w in why.values()]
+                    (self.run_dir / "unfinished.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
                 if st.anomalies:
                     s["final_state_anomalies"] = list(st.anomalies)[:20]
         except Exception as e:
