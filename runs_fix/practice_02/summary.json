@@ -1,0 +1,30 @@
+{
+  "problem": "P2",
+  "scenario": "practice_02",
+  "violations": [],
+  "vessels_departed": 3,
+  "vessels_total": 6,
+  "avg_turnaround_h": 29.36,
+  "fcfs_baseline_avg_turnaround_h_same_calls": 25.93,
+  "crane_moves_per_hour": 8.5,
+  "truck_idle_hours": 648.0,
+  "placements_into_blocks_over_85pct": 1060,
+  "import_boxes_delivered": 773,
+  "honest_turnaround_h": 49.93,
+  "unfinished_calls": [
+    "P02-003",
+    "P02-005",
+    "P02-006"
+  ],
+  "skeleton_exceptions": 0,
+  "loop": {
+    "exceptions": 0,
+    "watchdog": 0,
+    "breaches": 0,
+    "rules_only_ticks": 0,
+    "ticks": 1084,
+    "actions_sent": 115,
+    "actions_refused": 0,
+    "mismatches": 0
+  }
+}

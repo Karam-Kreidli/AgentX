@@ -1,0 +1,11 @@
+{
+  "started_utc": "2026-11-07T06:54:30+00:00",
+  "run": "practice_04",
+  "git_sha": "c6228e5",
+  "python": "3.12.4",
+  "llm_model": "qwen",
+  "llm_configured": true,
+  "groq_configured": false,
+  "llm_timeout_s": "8",
+  "llm_call_budget": "150"
+}
