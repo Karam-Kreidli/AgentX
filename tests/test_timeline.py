@@ -47,9 +47,12 @@ def test_intervals_events_and_classification(tmp_path):
 
 def test_log_text_cannot_break_out_of_the_page(tmp_path):
     _w(tmp_path / "decisions.jsonl", [json.dumps({"agent": "yard", "choice": "escalate", "guard_ok": True,
-                                                  "reason": "</script><script>alert(1)</script>"})])
+                                                  "reason": "<!-- </script><script>alert(1)</script>"})])
     page = timeline.render_html(timeline.build(tmp_path))
     assert page.count("</script>") == 2          # only the page's own two script tags
+    assert "<!--" not in page
+    a = page.index('application/json">') + 18
+    json.loads(page[a:page.index("</script>", a)])   # embedded data must still parse as JSON
 
 
 def test_cli_reports_a_missing_dir_without_a_traceback(tmp_path, capsys):

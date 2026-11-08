@@ -15,7 +15,8 @@ timeline.json (schema "agentx.timeline/1") is the one data file the Sun 15 demo 
   cranes      per crane: intervals [{status, call, t0, t1}]
   blocks      per block: capacity + fill points [[t, used]] (only where it changed)
   events      ship / crane status changes derived from consecutive ticks
-  actions     state-changing actions that went through (agent, choice, reason, t)
+  actions     decision records that went through (agent, choice, reason, t); also
+              holds non-action notes (guard_reason "n/a (not an action)"), e.g. grants
   refusals    actions the guard refused, or the simulator rejected
   escalations escalate decisions (issue + safe default taken)
   alerts      loop notes: CRITICAL, breaches, exceptions, clock problems, mismatches
@@ -304,7 +305,7 @@ sl.addEventListener('input',()=>setT(parseFloat(sl.value)));sl.value=H;setT(H);
 
 def render_html(tl: dict) -> str:
     data = json.dumps(tl, ensure_ascii=False, separators=(",", ":"))
-    data = data.replace("</", "<\\/").replace("<!--", "<\\!--")   # cannot close the <script> early
+    data = data.replace("<", "\\u003c")   # no "</script>" or "<!--" in the page; still valid JSON
     title = html.escape(str(tl.get("meta", {}).get("scenario") or "run"))
     return _PAGE.replace("__TITLE__", title).replace("__DATA__", data)
 
