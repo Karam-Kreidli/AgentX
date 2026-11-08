@@ -238,7 +238,8 @@ def test_transcript_has_each_conflict_once_with_reasons(tmp_path, monkeypatch):
     assert grants == [("S1", GRANTED), ("S2", TRIMMED), ("S2", GRANTED)]
     assert sum(x["kind"] == "request" for x in lines) == 3
     md = (tmp_path / "negotiation.md").read_text(encoding="utf-8")
-    assert "trimmed S2 from 60 to 40 yard_slots" in md and "wait for boxes to leave the yard" in md
+    assert "I can give you 40 of the 60 yard slots you asked for S2" in md and "wait for boxes to leave the yard" in md
+    assert all(x["sentence"] for x in lines)                       # LLM-5: every line has a sentence
 
 
 # ---------------------------------------------------------------- binding grants
