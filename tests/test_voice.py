@@ -142,10 +142,26 @@ def test_the_tick_slot_is_shared_first_come_first_served(monkeypatch):
     tick["now"] = 6
     V.voice_batch(items())
     assert len(seen) == 1 and not slot.claim("supervisor")  # voice has tick 6
-    assert slot.claim("voice")                              # its own tick again: fine
+    assert not slot.claim("voice")                          # one call per tick, even for its owner
+    V.voice_batch(items())                                  # another coordinator round, same tick
+    assert len(seen) == 1                                   # template, no second call
+    tick["now"] = 7
+    V.voice_batch(items())
+    assert len(seen) == 2
 
 
-def test_budget_reserve_and_per_scenario_cap():
+def test_a_tick_with_three_coordinator_rounds_makes_one_voice_call(monkeypatch):
+    seen = []
+    fake_llm(rewrite, seen)
+    monkeypatch.setattr(runlog, "current_tick", lambda: 9)
+    for _ in range(3):
+        lines = V.voice_batch(items())
+        assert all(lines)                                   # every line still gets a sentence
+    assert len(seen) == 1
+
+
+def test_budget_reserve_and_per_scenario_cap(monkeypatch):
+    monkeypatch.setattr(runlog, "current_tick", lambda: None)   # outside a run: the tick slot never limits
     seen = []
     c = fake_llm(rewrite, seen, budget=V.BUDGET_RESERVE)
     V.voice_batch(items())
@@ -204,3 +220,36 @@ def test_supervisor_waits_for_the_next_tick_when_the_voice_has_this_one(monkeypa
     V.voice_batch(items())
     opts = [Option("a", (), {}, "Template a."), Option("b", (), {}, "Template b.")]
     assert supervisor.decide(None, opts) == ("a", "Template a.") and len(seen) == 1
+
+
+WORKBOOK = Path(__file__).resolve().parents[1] / "data" / "P2_Container_Terminal_Data.xlsx"
+
+
+@pytest.mark.skipif(not WORKBOOK.exists(), reason="workbook not in data/")
+def test_a_real_run_never_makes_two_llm_calls_in_one_tick(tmp_path):
+    """The LLM-on scorecard (Sun 8 Nov) showed ticks over 10 s: the voice called once per
+    coordinator round, up to three ~4 s calls in a tick, and the watchdog finished those ticks
+    on rules-only decisions. Every LLM call now happens in a different tick."""
+    from core.loop import Loop
+    from run import make_agents
+    from vendor import TerminalAPI
+    ticks = []
+
+    def reply(data):
+        ticks.append(runlog.current_tick())
+        return rewrite(data)
+    fake_llm(reply)
+    api = TerminalAPI("practice_02", data_xlsx=str(WORKBOOK), log_path=str(tmp_path / "actions.jsonl"))
+    s = Loop(api, tmp_path, agents=make_agents("multi"), max_ticks=150).run()
+    assert len(ticks) >= 3                                      # the voice did get calls
+    assert len(ticks) == len(set(ticks)), ticks                 # never two in one tick
+    assert s["loop"]["watchdog"] == 0
+
+
+def test_each_run_starts_with_a_fresh_voice_cap_and_tick_slot(tmp_path):
+    from core.loop import Loop
+    from tests.test_executor import FakeAPI
+    V._mem.update(calls=V.MAX_CALLS)                            # the previous scenario used them all
+    slot._owner.update(tick=0, who="voice")                     # ... and claimed its tick 0
+    Loop(FakeAPI(), tmp_path, agents=[])
+    assert V._mem["calls"] == 0 and slot.holder(0) is None

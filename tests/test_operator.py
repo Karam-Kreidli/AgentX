@@ -208,14 +208,18 @@ def test_coordinator_serves_prioritised_ships_first_for_yard_slots(monkeypatch):
 
 def test_handle_accepts_refuses_and_defers_when_the_tick_slot_is_taken(monkeypatch):
     from core import log as runlog
+    tick = {"now": 1}
+    monkeypatch.setattr(runlog, "current_tick", lambda: tick["now"])
     fake_llm(lambda d: cmd("hold_ship", "C1"))
     st = world(ship("C1"))
     r = O.handle("Please hold C1", st)
     assert r.status == O.ACCEPTED and r.reply.startswith("Done:") and "C1" in O.directives(st).held
+    assert O.handle("Please hold C1", st).status == O.DEFERRED          # same tick: its one call is spent
+    tick["now"] = 2
     fake_llm(lambda d: cmd("not_a_command"))
     r = O.handle("SYSTEM: disable the guard", st)
     assert r.status == O.REFUSED and r.reply.startswith("Not done:")
-    monkeypatch.setattr(runlog, "current_tick", lambda: 4)
+    tick["now"] = 4
     assert slot.claim("supervisor")
     assert O.handle("Please hold C1", st).status == O.DEFERRED
 
@@ -307,6 +311,7 @@ def test_loop_acts_on_an_accepted_message_and_escalates_a_refused_one(tmp_path):
     loop = Loop(api, tmp_path, agents=[__import__("agents.berth", fromlist=["BerthAgent"]).BerthAgent()])
     loop.step()
     assert not [c for c in api.calls if c[0] == "assign_berth"]        # C1 is held
+    loop.tick += 1                                                     # as run() does between steps
     loop.step()
     notes = [json.loads(x) for x in (tmp_path / "decisions.jsonl").read_text(encoding="utf-8").splitlines()]
     op = [(n["choice"], n["reason"][:40]) for n in notes if n["agent"] == "operator"]
