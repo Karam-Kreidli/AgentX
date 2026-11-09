@@ -1,0 +1,12 @@
+{
+  "id": "conflict",
+  "title": "Drill 2: conflicting and hostile operator messages",
+  "scenarios": [
+    "practice_03"
+  ],
+  "operator_file": "tests/redteam/operator_messages.jsonl",
+  "llm": "off",
+  "expect": {
+    "min_escalations": 20
+  }
+}

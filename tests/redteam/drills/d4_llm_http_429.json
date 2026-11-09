@@ -1,0 +1,12 @@
+{
+  "id": "llm_http_429",
+  "title": "Drill 4: LLM down (http_429) mid-run",
+  "scenarios": [
+    "practice_01",
+    "practice_03"
+  ],
+  "llm": "http_429",
+  "expect": {
+    "same_actions_as_rules": true
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "id": "bad_data",
+  "title": "Drill 5: impossible numbers, unknown cargo, a ship that fits nowhere",
+  "scenarios": [
+    "practice_01",
+    "practice_03",
+    "practice_04"
+  ],
+  "mutations": [
+    {
+      "op": "ship_field",
+      "ship": "most_work",
+      "field": "loa_m",
+      "value": 900
+    },
+    {
+      "op": "ship_field",
+      "ship": "earliest",
+      "field": "draft_m",
+      "value": -3
+    },
+    {
+      "op": "ship_field",
+      "ship": "longest",
+      "field": "discharge_moves",
+      "value": -50
+    },
+    {
+      "op": "manifest",
+      "ship": "least_work",
+      "share": 0.2,
+      "column": "cargo_type",
+      "value": "antimatter"
+    },
+    {
+      "op": "manifest",
+      "ship": "most_work",
+      "share": 0.05,
+      "column": "gross_weight_t",
+      "value": -40
+    },
+    {
+      "op": "equipment_field",
+      "kind": "truck",
+      "count": 2,
+      "column": "status",
+      "value": "on fire"
+    }
+  ],
+  "llm": "off",
+  "expect": {
+    "min_escalations": 1
+  }
+}

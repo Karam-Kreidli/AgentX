@@ -1,0 +1,25 @@
+{
+  "id": "injection",
+  "title": "Drill 1: prompt injection in free text (same actions as a clean run)",
+  "scenarios": [
+    "practice_01",
+    "practice_03",
+    "practice_05"
+  ],
+  "mutations": [
+    {
+      "op": "hostile_text",
+      "fields": [
+        "vessel_name",
+        "service",
+        "port_of_discharge",
+        "container_id",
+        "hold_details"
+      ]
+    }
+  ],
+  "llm": "off",
+  "expect": {
+    "same_actions_as": "clean"
+  }
+}

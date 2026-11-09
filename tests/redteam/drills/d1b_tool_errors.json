@@ -1,0 +1,15 @@
+{
+  "id": "tool_errors",
+  "title": "Drill 1b: hostile text inside tool error messages",
+  "scenarios": [
+    "practice_01",
+    "practice_03"
+  ],
+  "mutations": [
+    {
+      "op": "tool_error_text"
+    }
+  ],
+  "llm": "off",
+  "expect": {}
+}
