@@ -36,7 +36,7 @@ from llm.supervisor import summary  # noqa: E402,F401  (the supervisor's own ter
 PRACTICE = [f"practice_0{i}" for i in range(1, 6)]
 DEFAULT_OUT = Path(__file__).resolve().parent / "data" / "decision_points.jsonl"   # git-ignored: workbook data
 TARGET = 50
-RATE = admission.CRANE_RATE * admission.DEFAULT_CRANES       # moves/h for one berthed ship
+RATE = admission.CRANE_RATE * 2       # moves/h for one berthed ship (bake-off cases were collected with 2 cranes)
 
 
 def _unplaced(state, call_id) -> int:
