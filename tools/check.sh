@@ -9,6 +9,10 @@
 #   scorecard  tools/eval_all.py --all --no-llm --against main, on every workbook. Fails on any
 #              violation / refused call / breach, any crash, an action without a reason, a scenario
 #              over 5 min, fewer ships departed than main, honest turnaround > main + 3 %
+#   variants   CORE-7: tools/perturb.py --ci makes a fixed set of 4 workbooks (1 mixed, 1 no-shortage, 2 malformed)
+#              and tools/eval_all.py runs them with --fcfs: the same checks as the scorecard, plus the
+#              expectations in index.json (bad data never berthed / placed, each anomaly escalated once) and
+#              "never worse than FCFS" on no-shortage scenarios
 #   redteam    tools/check_redteam.py: hostile vessel names (tests/redteam/) change no action
 #   honest     tools/check_honest.py: no IDs, vessel names, workbook reads, simulator calls or
 #              guard switches in agent code
@@ -30,7 +34,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
-ALL_STEPS="pytest scorecard redteam honest secrets"
+ALL_STEPS="pytest scorecard variants redteam honest secrets"
 OUT=runs/check
 
 # ------------------------------------------------------------------ setup
@@ -122,6 +126,38 @@ step_scorecard() {
     summary_md "$(grep '^|' "$dir/eval_all.txt" || true)"
     if [ "$r" -ne 0 ] && [ "${CHECK_ALLOW_KPI_REGRESSION:-0}" = 1 ] && kpi_only "$dir/scorecard.json"; then
       warn "KPI regression versus main on $wb, allowed by CHECK_ALLOW_KPI_REGRESSION: the PR must explain it"
+      [ $result -eq 0 ] && result=3
+    elif [ "$r" -ne 0 ]; then
+      result=1
+    fi
+  done
+  return $result
+}
+
+step_variants() {
+  need_workbooks; local rc=$?; [ $rc -ne 0 ] && return $rc
+  if [ ! -f tools/perturb.py ]; then
+    echo "tools/perturb.py (CORE-7) is missing: rebase on main."; return 1
+  fi
+  local against="" wb dir r result=0
+  if git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null 2>&1; then
+    against="--against $BASE"
+  else
+    warn "git ref '$BASE' not found: nothing to compare with, only the absolute checks run"
+  fi
+  for wb in $WORKBOOKS; do
+    dir="$OUT/$(label_of "$wb")/variants"
+    mkdir -p "$dir"
+    echo "--- variants: $wb (compared with ${against:-nothing})"
+    "$PY" tools/perturb.py --ci --data "$wb" --out "$dir/books" || { result=1; continue; }
+    # shellcheck disable=SC2086
+    "$PY" tools/eval_all.py --all --no-llm --data "$wb" --variants-dir "$dir/books" --variants 4 --fcfs \
+        --out "$dir" --md $against | tee "$dir/eval_all.txt"
+    r=${PIPESTATUS[0]}
+    summary_md "#### Variants: \`$wb\`"
+    summary_md "$(grep '^|' "$dir/eval_all.txt" || true)"
+    if [ "$r" -ne 0 ] && [ "${CHECK_ALLOW_KPI_REGRESSION:-0}" = 1 ] && kpi_only "$dir/scorecard.json"; then
+      warn "KPI regression versus main on the $wb variants, allowed by CHECK_ALLOW_KPI_REGRESSION: the PR must explain it"
       [ $result -eq 0 ] && result=3
     elif [ "$r" -ne 0 ]; then
       result=1

@@ -204,3 +204,131 @@ def test_output_survives_a_cp1252_console(monkeypatch):
     print(ev.markdown([row()], card(row())))
     sys.stdout.flush()
     assert "4/4 → 4/4".encode("utf-8") in buf.getvalue()
+
+
+# ---------------------------------------------------------------- CORE-7: variants, expectations, FCFS, limits
+
+def _run_dir(tmp_path, calls=(), decisions=(), name="run"):
+    d = tmp_path / name
+    d.mkdir()
+    (d / "actions.jsonl").write_text("\n".join(json.dumps(c) for c in calls), encoding="utf-8")
+    (d / "decisions.jsonl").write_text("\n".join(json.dumps(x) for x in decisions), encoding="utf-8")
+    return d
+
+
+def _call(tool, **args):
+    return {"action": "tool_call", "tool": tool, "arguments": args, "result": {"ok": True}}
+
+
+def _esc(reason, agent="validate"):
+    return {"agent": agent, "choice": "escalate", "reason": reason}
+
+
+def test_expect_never_berthed_and_never_placed(tmp_path):
+    d = _run_dir(tmp_path, [_call("assign_berth", call_id="P01-002", berth_id="B1"),
+                            _call("place_container", container_ids=["AAAU1", "BBBU2"], block_id="A")])
+    assert ev.expect_checks(d, row(), {"never_berthed": ["P01-009"], "never_placed": ["CCCU3"]}) == []
+    out = ev.expect_checks(d, row(), {"never_berthed": ["P01-002"], "never_placed": ["BBBU2"]})
+    assert len(out) == 2 and "P01-002" in out[0] and "BBBU2" in out[1]
+
+
+def test_expect_not_departed_event_and_anomaly(tmp_path):
+    d = _run_dir(tmp_path, decisions=[_esc("P01-003 must discharge 99 more boxes ... so it can never finish.", "stall"),
+                                      _esc("Bad data: 'P01-001' has no valid length. Safest default taken: x")])
+    exp = {"not_departed": ["P01-003"], "event": "ship_impossible", "anomaly": ["P01-001", "P01-003"]}
+    assert ev.expect_checks(d, row(unfinished=["P01-003"]), exp) == []
+    out = ev.expect_checks(d, row(unfinished=[]), {"not_departed": ["P01-003"], "anomaly": ["P01-777"]})
+    assert any("unfinished" in x for x in out) and any("P01-777" in x for x in out)
+    d2 = _run_dir(tmp_path, decisions=[_esc("P01-003 is odd")], name="run2")
+    assert any("can never finish" in x for x in ev.expect_checks(d2, row(unfinished=["P01-003"]), exp))
+
+
+def test_the_same_bad_data_sentence_twice_fails(tmp_path):
+    s = "Bad data: 'P01-001' has no valid length. Safest default taken: x"
+    d = _run_dir(tmp_path, decisions=[_esc(s), _esc(s)])
+    out = ev.expect_checks(d, row(), {})
+    assert len(out) == 1 and "more than once" in out[0]
+    assert ev.expect_checks(_run_dir(tmp_path, decisions=[_esc(s)], name="run2"), row(), {}) == []
+
+
+def test_missing_logs_are_no_failure_for_a_scenario_with_no_expectations(tmp_path):
+    assert ev.expect_checks(tmp_path / "nothing", row(), {}) == []
+
+
+def test_checks_include_expectation_failures():
+    assert ev.checks(row(expect_fails=["expect: x"]), None) == ["expect: x"]
+
+
+def test_same_as_compares_every_kpi_with_the_original():
+    a = row("practice_01")
+    ok = row("v06/practice_01")
+    bad = row("v07/practice_01", honest_h=41.0)
+    out = ev.same_as_checks([a, ok, bad], {"v06/practice_01": {"same_as": True}, "v07/practice_01": {"same_as": True},
+                                           "practice_01": {}})
+    assert list(out) == ["v07/practice_01"] and "honest_h 40.0 -> 41.0" in out["v07/practice_01"][0]
+
+
+def test_same_as_without_an_original_is_noted_not_failed(capsys):
+    assert ev.same_as_checks([row("v06/practice_03")], {"v06/practice_03": {"same_as": True}}) == {}
+    assert "not checked" in capsys.readouterr().out
+
+
+def test_fcfs_check_only_judges_no_shortage_scenarios():
+    mine = [row("v01/practice_01", departed=3), row("v02/practice_01", departed=3)]
+    fcfs = [row("v01/practice_01", departed=4), row("v02/practice_01", departed=4)]
+    out = ev.fcfs_checks(mine, fcfs, {"v01/practice_01"})
+    assert list(out) == ["v01/practice_01"] and "ships departed 3 < FCFS 4" in out["v01/practice_01"][0]
+
+
+def test_fcfs_check_allows_three_percent_on_turnaround():
+    f = [row("v/p", honest_h=30.0)]
+    assert ev.fcfs_checks([row("v/p", honest_h=30.8)], f, {"v/p"}) == {}
+    assert "honest turnaround" in ev.fcfs_checks([row("v/p", honest_h=31.0)], f, {"v/p"})["v/p"][0]
+    assert ev.fcfs_checks([row("v/p", honest_h=20.0)], f, {"v/p"}) == {}
+
+
+def test_limits_rule_reports_refused_calls_but_fails_on_the_rest():
+    assert ev.limits_checks(row(refused_calls=40, breaches=2)) == []
+    assert ev.limits_checks(row(violations=1)) and ev.limits_checks(row(exceptions=1))
+    assert ev.limits_checks(row(missing_reasons=1)) and ev.limits_checks(row(crashed="boom"))
+
+
+def _books(tmp_path, names=("v02", "m01", "v01", "m_yard"), index=True):
+    tmp_path.mkdir(exist_ok=True)
+    for n in names:
+        (tmp_path / f"{n}.xlsx").write_bytes(b"")
+    (tmp_path / "MOCK_ANSWER_KEY.xlsx").write_bytes(b"")
+    if index:
+        fam = {"v01": "shifted", "v02": "noshort_fewer", "m01": "nan_size", "m_yard": "yard_capacity"}
+        books = {n: {f"practice_0{i}": {"family": fam[n], "expect": {"x": n}} for i in (1, 2)} for n in names}
+        (tmp_path / "index.json").write_text(json.dumps({"books": books}), encoding="utf-8")
+
+
+def test_books_come_perturbed_first_then_malformed_and_never_the_mock_key(tmp_path):
+    _books(tmp_path)
+    assert [p.stem for p in ev.variant_books(tmp_path, ev.load_index(tmp_path))] == ["v01", "v02", "m01", "m_yard"]
+    plain = tmp_path / "plain"
+    _books(plain, index=False)
+    assert [p.stem for p in ev.variant_books(plain, None)] == ["v01", "v02", "m01", "m_yard"]
+
+
+def test_plan_filters_by_family_and_meta_carries_family_and_expect(tmp_path):
+    _books(tmp_path)
+    spec = ev.plan(["practice_01", "practice_02"], 9, Path("d.xlsx"), tmp_path, ["noshort_fewer", "nan_size"])
+    assert [l for l, _, _ in spec] == ["practice_01", "practice_02", "v02/practice_01", "v02/practice_02",
+                                       "m01/practice_01", "m01/practice_02"]
+    meta = ev.meta_for(spec, tmp_path)
+    assert meta["practice_01"] == {"family": "practice", "expect": {}}
+    assert meta["v02/practice_02"] == {"family": "noshort_fewer", "expect": {"x": "v02"}}
+
+
+def test_by_family_and_markdown_group_variant_rows():
+    rows = [row("practice_01"), row("v01/practice_01", family="shifted"), row("v01/practice_02", family="shifted", departed=3),
+            row("m01/practice_01", family="nan_size", crashed="boom")]
+    fails = {r["label"]: [] for r in rows}
+    fails["v01/practice_02"] = ["x"]
+    fam = {f["family"]: f for f in ev.by_family(rows, fails)}
+    assert fam["shifted"]["n"] == 2 and fam["shifted"]["departed"] == 7 and fam["shifted"]["failed"] == 1
+    assert fam["nan_size"]["crashes"] == 1
+    md = ev.markdown(rows, None, fails)
+    assert "| practice_01 |" in md and "v01/practice_01" not in md and "| shifted | 2 |" in md
