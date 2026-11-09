@@ -95,7 +95,9 @@ summary_md() { if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$1" >> "$GITHUB_
 
 # ------------------------------------------------------------------ steps (0 pass, 1 fail, 2 skip, 3 warn)
 step_pytest() {
-  "$PY" -m pytest -q -m "not llm"
+  # pytest exits 2 (collection error/interrupted), 3 (internal error), 4 (usage) or 5 (no tests):
+  # every non-zero exit is a FAIL here, never read as SKIP/WARN by the step runner.
+  "$PY" -m pytest -q -m "not llm" || return 1
 }
 
 step_scorecard() {
