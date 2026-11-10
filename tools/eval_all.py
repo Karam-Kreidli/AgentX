@@ -563,7 +563,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                    help="also run the FCFS rules-only agent on practice and no-shortage scenarios; multi must not be worse")
     p.add_argument("--limits", action="store_true", help="pass rule of the toolkit-limit set (see the module docstring)")
     p.add_argument("--no-llm", action="store_true", help="rules only: never call a language model")
-    p.add_argument("--agent", choices=["multi", "skeleton"], default="multi")
+    p.add_argument("--agent", choices=["multi", "skeleton", "single", "multi-nocoord"], default="multi")
     p.add_argument("--data", type=Path, default=DEFAULT_DATA)
     p.add_argument("--against", metavar="REF", help="fresh before/after: also run git REF (e.g. origin/main)")
     p.add_argument("--baseline", type=Path, metavar="FILE", help="compare with a saved scorecard JSON")
