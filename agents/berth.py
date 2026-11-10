@@ -34,12 +34,14 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Optional
 
+from core import params
 from core.types import (RES_BERTH, SHIP_ARRIVED, SHIP_BERTHED, SHIP_EXPECTED, SHIP_SAILING, SHIP_WORKING,
                         TOOL_ASSIGN_BERTH, Action, Event, Request, WorldState)
 
 AGENT = "berth"
 BUSY = (SHIP_BERTHED, SHIP_WORKING, SHIP_SAILING)
-HOLD_H = 2.0          # keep a berth this long ahead of a ship that fits only that berth
+HOLD_H = params.get("berth.hold_h")          # keep a berth this long ahead of a ship that fits only it (config/params.yaml)
+AGE_WEIGHT = params.get("berth.age_weight")  # moves of priority a waiting ship gains per hour waited
 
 
 def _impossible(state: WorldState) -> set:
@@ -66,7 +68,11 @@ def rank(state: WorldState, ships: list) -> list:
     hopeless = _impossible(state)
     d = _operator(state)
     prio = {c: i for i, c in enumerate(d.priority)} if d is not None else {}
-    return sorted(ships, key=lambda s: (s.call_id in hopeless, prio.get(s.call_id, len(prio)), s.remaining_moves,
+    def work(s) -> float:                     # least work first; with AGE_WEIGHT > 0, long waits count too
+        if not AGE_WEIGHT or s.actual_arrival is None:
+            return s.remaining_moves
+        return s.remaining_moves - AGE_WEIGHT * max(0.0, (state.now - s.actual_arrival).total_seconds() / 3600)
+    return sorted(ships, key=lambda s: (s.call_id in hopeless, prio.get(s.call_id, len(prio)), work(s),
                                         s.actual_arrival or state.now, s.call_id))
 
 

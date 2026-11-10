@@ -1,0 +1,17 @@
+# BC-4 tuning parameters, read by core/params.py (a small YAML subset: sections, "key: value", comments).
+# Every value must make sense on any terminal and any scenario: nothing here names a scenario, ship,
+# berth, crane or box (GROUND_RULES §3). Tuned on practice + perturbed + no-shortage variants together;
+# see tools/tune.py and the BC-4 PR for the numbers. A missing or broken entry falls back to the
+# default in core/params.py, which is the value used before BC-4.
+
+berth:
+  hold_h: 2.0          # keep a free berth this many hours for an expected ship that fits only that berth
+  age_weight: 0.0      # moves of priority a waiting ship gains per hour waited (0 = least work first)
+
+crane:
+  tick_h: 0.1          # horizon (hours) for "cranes a ship can keep busy": demand = work / (23 moves/h x tick_h)
+               #   BC-4: 0.1 beat 0.25 on all three sets and on a held-out seed (default 0.25)
+  spare_to: shortest_job   # spare cranes go to the shortest job (shortest_job) or the most work left (most_work)
+
+options:
+  min_gain_h: 1.0      # BC-3: an alternative plan is offered only if it changes the average finish by this much
