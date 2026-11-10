@@ -58,6 +58,7 @@ def test_yard_room_given_to_one_ship_trims_the_other_ships_cranes(monkeypatch):
 
 def test_a_small_yard_grant_keeps_fewer_cranes_busy(monkeypatch):
     no_forecast(monkeypatch)
+    monkeypatch.setattr(crane_agent, "TICK_H", 0.25)   # the 15-minute horizon; config/params.yaml may differ
     st = two_ships(free=12)                       # 12 boxes = ~2 cranes for a 15-minute tick
     g = {(x.request.resource, x.request.call_id): x for x in
          C.decide([yard_req("A", 100), crane_req("A", 6)], st)[0]}

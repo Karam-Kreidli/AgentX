@@ -36,6 +36,7 @@ from __future__ import annotations
 from dataclasses import replace
 import guard
 from agents.crane_moves import _num, plans_from_state, safe_crane_moves
+from core import params
 from core.types import (EQ_AVAILABLE, EQ_WORKING, SHIP_ARRIVED, SHIP_BERTHED, SHIP_SAILING, SHIP_WORKING,
                         TOOL_ASSIGN_BERTH, TOOL_PLAN_CRANES, Action, Option, WorldState)
 
@@ -44,7 +45,7 @@ CRANE_RATE = 23.0            # moves/h per crane at full trucks (same as YARD-3)
 PREDICT_STEP_H = 0.25        # berth-option model step (one normal tick)
 WORK_DELAY_H = 1.0           # work starts ~1 h after berthing
 SAIL_DELAY_H = 1.0           # a ship sails ~1 h after its last move
-MIN_GAIN_H = 1.0             # an alternative must change the outcome by at least this much
+MIN_GAIN_H = params.get("options.min_gain_h")   # an alternative must change the outcome by this much (config/params.yaml)
 CRANE_OPTIONS = False        # stays off: CRANE-2 decides this itself (see module docstring)
 BUSY = (SHIP_BERTHED, SHIP_WORKING, SHIP_SAILING)
 
