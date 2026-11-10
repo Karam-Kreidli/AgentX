@@ -97,7 +97,7 @@ if [ -n "$KEY" ]; then
   echo "=== hidden scenarios with the key"
   timed "$PY" run.py --all-hidden --key "$KEY" --no-llm
   RC=$?
-  PER=$((ELAPSED / 1))
+  COUNT=$(ls -d runs/hidden_* 2>/dev/null | wc -l | tr -d " "); PER=$((ELAPSED / (COUNT > 0 ? COUNT : 1)))   # average per scenario
   [ $RC -eq 0 ] || fail "--all-hidden exit $RC"
   N=0
   for d in runs/hidden_*; do
