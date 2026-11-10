@@ -52,6 +52,13 @@ def boxes(cid, n, placed=None, start=0, cargo="dry"):
     return tuple(Container(f"{cid}-{i}", cid, "import", 40, cargo, None, 20.0, placed) for i in range(start, start + n))
 
 
+@pytest.fixture(autouse=True)
+def _pre_bc4_horizon(monkeypatch):
+    """These tests pin the demand arithmetic at the pre-BC-4 horizon (0.25 h); the tuned value lives in
+    config/params.yaml and is checked by tests/test_params.py and the scorecard."""
+    monkeypatch.setattr(C, "TICK_H", 0.25)
+
+
 def world(ships, pos=None, broken=(), manifests=None, free=50):
     pos = pos or HOME
     on = {c: s.call_id for s in ships for c in s.cranes}

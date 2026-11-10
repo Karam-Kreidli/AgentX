@@ -39,13 +39,15 @@ from typing import Mapping, Optional
 
 from agents import stall
 from agents.crane_moves import _num, plans_from_state, safe_crane_moves, unsafe
+from core import params
 from core.types import (BLOCK_EMPTY, BLOCK_IMDG, BLOCK_REEFER, BLOCK_STANDARD, CARGO_DRY, CARGO_IMDG,
                         CARGO_REEFER, EQ_OUT_OF_SERVICE, RES_CRANES, SHIP_BERTHED, SHIP_WORKING, Action,
                         Event, Request, WorldState)
 
 AGENT = "crane"
 RATE = 23.0             # moves per crane-hour: rated 26-28 x 0.85 (simulator model)
-TICK_H = 0.25           # one normal tick: demand is the work a crane can reach in it
+TICK_H = params.get("crane.tick_h")   # demand horizon: the work a crane can reach in it (config/params.yaml)
+SPARE_TO = params.get("crane.spare_to")   # spare cranes: "shortest_job" or "most_work"
 MAX_PER_SHIP = 6
 AT_BERTH = (SHIP_BERTHED, SHIP_WORKING)
 IDLE = -1
@@ -204,7 +206,10 @@ def allocate(state: WorldState, caps: Optional[Mapping[str, int]] = None
         starved = sum(1 for i, s in enumerate(ships) if need[s.call_id] > 0 and k[i] == 0)
         useful = sum(min(k[i], need[s.call_id]) for i, s in enumerate(ships))
         waste = sum(max(0, k[i] - need[s.call_id]) for i, s in enumerate(ships))
-        spt = sum(min(k[i], need[s.call_id]) / max(1, left[s.call_id]) for i, s in enumerate(ships))
+        if SPARE_TO == "most_work":
+            spt = sum(min(k[i], need[s.call_id]) * left[s.call_id] for i, s in enumerate(ships))
+        else:
+            spt = sum(min(k[i], need[s.call_id]) / max(1, left[s.call_id]) for i, s in enumerate(ships))
         churn = sum(1 for c, x in zip(movable, labels)
                     if (ships[x].call_id if x != IDLE else None) != current.get(c))
         scored.append(((starved, -useful, waste, -spt, churn), labels))
