@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from core import log as runlog
+from core import params
 from core import safety
 from core.explain import Explainer
 from core.events import detect_events
@@ -128,6 +129,7 @@ class Loop:
         self.stopped: Optional[str] = None       # why the run ended early, if it did
         self.clock_now = None                    # simulator time after the last successful advance
         self.explain = Explainer()               # review: one feed sentence per re-plan, why ships did not finish
+        self._params_noted = False               # BC-4: problems in config/params.yaml are noted once
 
     # ------------------------------------------------------------------ helpers
     def _note(self, state, agent, choice, reason, saw=None):
@@ -473,6 +475,10 @@ class Loop:
                                "stopping the run cleanly.")
                     return
                 continue
+            if not self._params_noted:        # BC-4: a bad config/params.yaml runs on defaults; say so once
+                self._params_noted = True
+                for p in params.problems():
+                    self._note(state, "params", "anomaly", f"config/params.yaml: {p}. Logged; the run carries on.")
             # A failed snapshot leaves `state` (and a failed clock read leaves state.now) at an old
             # time, so also use the simulator's own answer to the last advance (PR #11's rule).
             now = max(state.now, self.clock_now or state.now)
