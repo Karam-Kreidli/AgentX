@@ -185,14 +185,18 @@ class SkeletonAgent:
             if s.status not in (SHIP_BERTHED, SHIP_WORKING) or s.discharge_remaining <= 0:
                 continue
             todo: dict[str, list[str]] = {}
+            unknown = 0
             for c in state.manifests.get(s.call_id, ()):
                 if c.direction != "import" or c.yard_block:
                     continue
                 if c.cargo_type not in LEGAL_BLOCK_TYPES:
-                    self._escalate(f"cargo:{c.container_id}",
-                                   f"An import box of {s.call_id} has an unknown cargo type; it is not placed.")
+                    unknown += 1
                     continue
                 todo.setdefault(c.cargo_type, []).append(c.container_id)
+            if unknown:                              # once per ship, not once per box
+                self._escalate(f"cargo:{s.call_id}",
+                               f"{unknown} import box(es) of {s.call_id} have an unknown cargo type; "
+                               f"they are not placed.")
             for cargo, boxes in todo.items():
                 prefs = LEGAL_BLOCK_TYPES[cargo]
                 legal = sorted((b for b in free if btype[b] in prefs), key=lambda b: (prefs.index(btype[b]), b))
