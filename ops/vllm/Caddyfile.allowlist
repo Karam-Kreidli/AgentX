@@ -1,0 +1,38 @@
+# LLM-7, optional: same as Caddyfile, plus an IP allowlist, for when the organizers give us
+# the address their machine calls from. Funnel must then pass the caller's address on with the
+# PROXY protocol (plain `tailscale funnel ... http://...` does not), so start it like this:
+#
+#   ALLOW_IPS="203.0.113.7/32 198.51.100.0/24" caddy run --config ops/vllm/Caddyfile.allowlist
+#   tailscale funnel --bg --tls-terminated-tcp=443 --proxy-protocol=2 tcp://127.0.0.1:8081
+#
+# Add every teammate's address too (or they test over the tailnet with healthcheck.py on the VM).
+# Check from an allowed and a non-allowed machine before relying on it (runbook).
+{
+	admin off
+	auto_https off
+	servers 127.0.0.1:8081 {
+		listener_wrappers {
+			proxy_protocol {
+				timeout 5s
+				allow 127.0.0.1/32
+			}
+		}
+	}
+}
+
+http://127.0.0.1:8081 {
+	bind 127.0.0.1
+	@outside not remote_ip {$ALLOW_IPS}
+	respond @outside 403
+	request_body {
+		max_size 64KB
+	}
+	@unknown not path /v1/models /v1/chat/completions /health
+	respond @unknown 404
+	reverse_proxy 127.0.0.1:8000 {
+		transport http {
+			dial_timeout 2s
+			response_header_timeout 60s
+		}
+	}
+}

@@ -15,3 +15,12 @@ crane:
 
 options:
   min_gain_h: 1.0      # BC-3: an alternative plan is offered only if it changes the average finish by this much
+
+yard:
+  soft_fill: 0.85      # spread dry boxes over standard blocks up to this fill before any block goes past it
+                       #   YARD-6: 0.7-1.0 change no departure or turnaround; 1.0 puts each ship's boxes in fewer
+                       #   blocks (5.7 vs 6.6) but places 7x more boxes over 85 % when the yard has room
+  prefer: nearest      # nearest: the block nearest the ship's berth; together: a block that already holds the ship's boxes first
+                       #   YARD-6: same results either way: once the yard is full, free slots open one block at a time
+  reefer_keep: 0.0     # share of each reefer block (I/J) kept for reefers: dry boxes overflow into the rest only
+                       #   YARD-6: 0.25 and 0.5 cost 2 ships on practice and 6 on perturbed: dry overflow into I/J pays

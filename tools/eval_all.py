@@ -232,6 +232,7 @@ def make_row(label: str, s: dict, sim: dict, missing: int, escalations: int) -> 
         "moves_h": s.get("crane_moves_per_hour"),
         "truck_idle_h": s.get("truck_idle_hours"),
         "over85": s.get("placements_into_blocks_over_85pct"),
+        "blocks_ship": s.get("yard_blocks_per_ship_mean"),     # YARD-6: blocks per ship's import boxes (lower = together)
         "delivered": s.get("import_boxes_delivered"),
         "missing_reasons": missing,
         "guard_refusals": loop.get("actions_refused", 0),
@@ -417,7 +418,7 @@ def print_table(rows: list[dict], fails: dict, baseline: Optional[dict]) -> None
     base = {b["label"]: b for b in (baseline or {}).get("rows", [])}
     cols = [("scenario", 22), ("pass", 5), ("departed", 10), ("honest h", 14), ("sim h", 7), ("FCFS h", 7),
             ("viol", 5), ("refused", 8), ("crash", 6), ("no reason", 10), ("moves/h", 8), ("truck idle", 11),
-            (">85%", 6), ("escal.", 7), ("LLM", 5), ("wall s", 7)]
+            (">85%", 6), ("blk/ship", 9), ("escal.", 7), ("LLM", 5), ("wall s", 7)]
     print("".join(h.ljust(w) for h, w in cols))
     for r in rows:
         b = base.get(r["label"]) or {}
@@ -429,7 +430,7 @@ def print_table(rows: list[dict], fails: dict, baseline: Optional[dict]) -> None
         cells = [r["label"], "ok" if not fails[r["label"]] else "FAIL", _delta(dep, bdep),
                  _delta(r["honest_h"], b.get("honest_h")), _f(r["sim_h"]), _f(r["fcfs_h"]),
                  r["violations"] + r["breaches"], r["refused_calls"], r["exceptions"], r["missing_reasons"],
-                 _f(r["moves_h"]), _f(r["truck_idle_h"]), _f(r["over85"]), r["escalations"],
+                 _f(r["moves_h"]), _f(r["truck_idle_h"]), _f(r["over85"]), _f(r.get("blocks_ship")), r["escalations"],
                  r["llm_calls"], _f(r["wall_s"])]
         print("".join(str(c).ljust(w) for c, (_, w) in zip(cells, cols)))
     t = totals(rows)

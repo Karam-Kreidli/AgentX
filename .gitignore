@@ -36,4 +36,6 @@ Thumbs.db
 !README.md
 # Prompts are code, not private docs (LLM-3/4/5/6).
 !**/prompts/*.md
+# The day-of runbook is for whoever runs the endpoint (LLM-7); no secrets in it.
+!ops/vllm/runbook.md
 runs_*/
