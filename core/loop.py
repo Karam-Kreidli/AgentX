@@ -98,8 +98,11 @@ class Loop:
     def __init__(self, api: Any, run_dir: Path, agents: Optional[list] = None,
                  tick_budget_s: float = TICK_BUDGET_S, max_ticks: int = 100_000,
                  call_timeout_s: Optional[float] = None, run_budget_s: Optional[float] = None,
-                 kill_after_s: Optional[float] = None):
+                 kill_after_s: Optional[float] = None, coordinate: bool = True):
         self.api = api
+        # CORE-7/8: False = no coordinator, no grants, no options, no supervisor. For the FCFS reference,
+        # the single-agent baseline and the "no negotiation" ablation. The real run always uses True.
+        self.coordinate = coordinate
         self.run_dir = Path(run_dir)
         self.log = DecisionLog(self.run_dir)
         self.ex = Executor(api, self.run_dir, self.log)
@@ -399,7 +402,7 @@ class Loop:
                 rules_only = self._watchdog(state)
                 by_agent, requests = [(self.rules, self._rules_fallback(state, evs))], []
             extra: list[Action] = []
-            if not rules_only:
+            if not rules_only and self.coordinate:
                 try:
                     extra = self._coordinate(state, evs, requests, by_agent)
                 except Exception as e:

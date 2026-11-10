@@ -49,7 +49,7 @@ def run_one(scenario: str, data: Path, key: Path | None, runs: Path, agent: str 
         api = TerminalAPI(scenario, data_xlsx=str(data), key_xlsx=str(key) if key else None,
                           log_path=str(run_dir / "actions.jsonl"))
         llm_client.new_scenario(run_dir / "llm_calls.jsonl")     # fresh call budget per scenario (LLM-2)
-        summary = Loop(api, run_dir, agents=make_agents(agent)).run()
+        summary = Loop(api, run_dir, agents=make_agents(agent), coordinate=agent == "multi").run()
     except Exception as e:      # SAFE-4: a scenario that can't even start still gets a summary.json
         _write_failed_summary(run_dir, scenario, e, time.perf_counter() - t0)
         raise
