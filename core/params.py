@@ -28,6 +28,9 @@ SPEC: dict[str, tuple[Any, tuple]] = {
     "crane.tick_h": (0.25, (0.05, 4.0)),         # horizon for "cranes a ship can keep busy"
     "crane.spare_to": ("shortest_job", ("shortest_job", "most_work")),   # where spare cranes go
     "options.min_gain_h": (1.0, (0.0, 24.0)),    # an alternative plan must change the outcome by this much
+    "yard.soft_fill": (0.85, (0.5, 1.0)),        # YARD-6: keep standard blocks at or under this while other room exists
+    "yard.prefer": ("nearest", ("nearest", "together")),   # YARD-6: nearest block, or the ship's own blocks first
+    "yard.reefer_keep": (0.0, (0.0, 1.0)),       # YARD-6: share of each reefer block dry boxes may not use
 }
 
 _values: Optional[dict] = None

@@ -30,12 +30,15 @@ from __future__ import annotations
 import math
 from typing import Optional
 
+from core import params
 from core.types import (BLOCK_EMPTY, BLOCK_IMDG, BLOCK_REEFER, BLOCK_STANDARD, CARGO_DRY, CARGO_IMDG,
                         CARGO_REEFER, KNOWN_CARGO, RES_YARD_SLOTS, SHIP_BERTHED, SHIP_WORKING, TOOL_PLACE,
                         Action, Event, Request, WorldState)
 
 AGENT = "yard"
-SOFT_FILL = 0.85            # keep standard blocks at or under 85% while other room exists
+SOFT_FILL = params.get("yard.soft_fill")        # keep standard blocks at or under this while other room exists
+PREFER = params.get("yard.prefer")              # "nearest" | "together" (YARD-6: a ship's boxes in few blocks)
+REEFER_KEEP = params.get("yard.reefer_keep")    # share of each reefer block dry boxes may not use (YARD-6)
 
 # Truck travel time in minutes, berth -> block. Static reference data (terminal layout).
 TRAVEL_MIN: dict[str, dict[str, float]] = {
@@ -47,6 +50,14 @@ TRAVEL_MIN: dict[str, dict[str, float]] = {
 
 def _travel(berth: str | None, block: str) -> float:
     return TRAVEL_MIN.get(berth or "", {}).get(block, 99.0)
+
+
+def dry_room_in_reefer(block, free: int) -> int:
+    """Slots of a reefer block dry boxes may still take: all of them unless REEFER_KEEP keeps a
+    share for reefers. Shared with the coordinator so a grant is what the yard agent can place."""
+    if REEFER_KEEP <= 0:
+        return max(0, free)
+    return max(0, min(free, math.floor((1 - REEFER_KEEP) * block.slots) - (block.slots - free)))
 
 
 class YardAgent:
@@ -63,9 +74,12 @@ class YardAgent:
             self.escalations.append(message)
 
     # ------------------------------------------------------------------ plan
-    def _targets(self, cargo: str, berth: str | None, blocks: dict, free: dict) -> list[tuple[str, int]]:
-        """(block, how many may go there now) in order of preference for one cargo type."""
-        near = lambda b: (_travel(berth, b), b)                                  # noqa: E731
+    def _targets(self, cargo: str, berth: str | None, blocks: dict, free: dict,
+                 mine: Optional[dict] = None) -> list[tuple[str, int]]:
+        """(block, how many may go there now) in order of preference for one cargo type. With
+        PREFER == "together", blocks already holding this ship's boxes (`mine`) come first, most first."""
+        mine = mine if PREFER == "together" and mine else {}
+        near = lambda b: (-mine.get(b, 0), _travel(berth, b), b)                 # noqa: E731
         of = lambda kind: sorted((b for b, blk in blocks.items() if blk.block_type == kind), key=near)  # noqa: E731
         if cargo == CARGO_IMDG:
             return [(b, free[b]) for b in of(BLOCK_IMDG)]
@@ -78,7 +92,7 @@ class YardAgent:
             out.append((b, max(0, min(free[b], soft))))
         out += [(b, free[b]) for b in of(BLOCK_STANDARD)]
         out += [(b, free[b]) for b in of(BLOCK_EMPTY)]
-        out += [(b, free[b]) for b in of(BLOCK_REEFER)]
+        out += [(b, dry_room_in_reefer(blocks[b], free[b])) for b in of(BLOCK_REEFER)]
         return out
 
     def propose(self, state: WorldState, events: list[Event]) -> tuple[list[Action], list[Request]]:
@@ -112,9 +126,13 @@ class YardAgent:
                     f"{want} import boxes of {s.call_id} need a yard slot before they can be discharged."))
             limit = want if self.grants is None else self.grants.get((RES_YARD_SLOTS, s.call_id), 0)
             queued = 0
+            mine: dict[str, int] = {}                    # YARD-6: where this ship's boxes already are
+            for c in state.manifests.get(s.call_id, ()):
+                if c.direction == "import" and c.yard_block:
+                    mine[c.yard_block] = mine.get(c.yard_block, 0) + 1
             for cargo in (CARGO_IMDG, CARGO_REEFER, CARGO_DRY):
                 boxes = todo.get(cargo, [])
-                for block_id, room in self._targets(cargo, s.berth, blocks, free):
+                for block_id, room in self._targets(cargo, s.berth, blocks, free, mine):
                     if not boxes or limit <= 0:
                         break
                     n = min(room, free[block_id], len(boxes), limit)
@@ -123,13 +141,16 @@ class YardAgent:
                     batch, boxes = boxes[:n], boxes[n:]
                     blk = blocks[block_id]
                     after = blk.slots - free[block_id] + n
+                    why = (f"{block_id} already holds {mine[block_id]} of its boxes and is a legal {blk.block_type} "
+                           f"block with room" if PREFER == "together" and mine.get(block_id) else
+                           f"{block_id} is the nearest legal {blk.block_type} block with room")
                     actions.append(Action(
                         TOOL_PLACE, {"container_ids": batch, "block_id": block_id}, AGENT,
-                        f"{n} {cargo} import boxes of {s.call_id} need a slot before discharge; "
-                        f"{block_id} is the nearest legal {blk.block_type} block with room "
+                        f"{n} {cargo} import boxes of {s.call_id} need a slot before discharge; {why} "
                         f"({_travel(s.berth, block_id):g} min from {s.berth}, {after}/{blk.slots} after)."))
                     free[block_id] -= n
                     limit -= n
+                    mine[block_id] = mine.get(block_id, 0) + n
                 if limit > 0:
                     queued += len(boxes)                 # granted, but no legal room
             if queued:

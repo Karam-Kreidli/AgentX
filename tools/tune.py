@@ -42,7 +42,8 @@ def summarise(rows: list[dict]) -> dict:
     out: dict = {}
     for r in rows:
         g = out.setdefault(set_of(r.get("family") or "practice"),
-                           {"n": 0, "departed": 0, "total": 0, "_h": [], "violations": 0, "crashes": 0})
+                           {"n": 0, "departed": 0, "total": 0, "_h": [], "violations": 0, "crashes": 0,
+                            "over85": 0, "_blk": []})
         g["n"] += 1
         if r.get("crashed"):
             g["crashes"] += 1
@@ -52,10 +53,15 @@ def summarise(rows: list[dict]) -> dict:
         if r["honest_h"] is not None:
             g["_h"].append(r["honest_h"])
         g["violations"] += eval_all.violations_total(r)
+        g["over85"] += r.get("over85") or 0
+        if r.get("blocks_ship") is not None:
+            g["_blk"].append(r["blocks_ship"])
         g["crashes"] += r["exceptions"]
     for g in out.values():
         h = g.pop("_h")
         g["honest_h"] = round(sum(h) / len(h), 2) if h else None
+        blk = g.pop("_blk")
+        g["blocks_ship"] = round(sum(blk) / len(blk), 2) if blk else None
     return out
 
 
@@ -124,7 +130,8 @@ def main(argv=None) -> int:
         results.append(r)
         base = results[0]["sets"]
         why = holds(r["sets"], base) if r is not results[0] else []
-        cells = " · ".join(f"{k} {g['departed']}/{g['total']} {g['honest_h']} h" for k, g in sorted(r["sets"].items()))
+        cells = " · ".join(f"{k} {g['departed']}/{g['total']} {g['honest_h']} h >85% {g['over85']} blk {g['blocks_ship']}"
+                           for k, g in sorted(r["sets"].items()))
         print(f"{a.param}={v!s:<14} {cells}  [{'current' if r is results[0] else ('holds' if not why else 'worse: ' + '; '.join(why))}]"
               f"  ({r['wall_s']} s)", flush=True)
     a.out.mkdir(parents=True, exist_ok=True)
