@@ -349,6 +349,18 @@ class Loop:
                    {"options": [o.id for o in options], "backend": backend})
         return pick
 
+    def _llm_health(self, state) -> None:
+        """LLM-7: one note per LLM backend going down or coming back (from llm.client). Never raises."""
+        try:
+            cli = sys.modules.get("llm.client")     # only if something already uses the LLM in this process
+            changes = cli.pop_transitions() if cli is not None else []
+        except Exception as e:
+            changes = []
+            self._note(state, "llm", "exception", f"could not read the LLM backend state: {type(e).__name__}")
+        for c in changes:
+            self._note(state, "llm", "llm_up" if c.get("up") else "llm_down", str(c.get("sentence", ""))[:300],
+                       {"backend": c.get("backend"), "why": c.get("why")})
+
     def _invariants(self, state) -> None:
         inv = _optional("core.invariants")
         if inv is None:
@@ -479,6 +491,7 @@ class Loop:
                 self._params_noted = True
                 for p in params.problems():
                     self._note(state, "params", "anomaly", f"config/params.yaml: {p}. Logged; the run carries on.")
+            self._llm_health(state)           # LLM-7: the model going down or coming back is in the run log
             # A failed snapshot leaves `state` (and a failed clock read leaves state.now) at an old
             # time, so also use the simulator's own answer to the last advance (PR #11's rule).
             now = max(state.now, self.clock_now or state.now)

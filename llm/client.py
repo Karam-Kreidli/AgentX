@@ -175,6 +175,8 @@ class LLMClient:
         self._lock = threading.Lock()
         self.used = 0
         self.records: list[dict] = []
+        self._up: dict[str, bool] = {}            # LLM-7: last known state per backend (absent = not known yet)
+        self._transitions: list[dict] = []        # LLM-7: up/down changes, drained by the loop into the run log
 
     # ---- public
 
@@ -223,6 +225,9 @@ class LLMClient:
                 status = "invalid_json"
             if status in ("timeout", "connect_error", "model_not_served") or status.startswith("http_4"):
                 b.down_until = self._clock() + BREAKER_COOLDOWN_S
+                self._mark(b, False, f"warm-up: {status}")
+            elif status == "ok":
+                self._mark(b, True, "warm-up")
             self._log("warmup", b, f"warmup_{status}", self._clock() - t0)
             out[b.name] = status
         return out
@@ -259,6 +264,31 @@ class LLMClient:
     def close(self) -> None:
         self._http.close()
 
+    def pop_transitions(self) -> list[dict]:
+        """LLM-7: the backends' up/down changes since the last call, oldest first, each
+        {"backend", "up", "why", "sentence"}. The loop writes them into the run log."""
+        with self._lock:
+            out, self._transitions = self._transitions, []
+        return out
+
+    def _mark(self, b: Backend, up: bool, why: str) -> None:
+        """Record a change of state. The first success is not news; a first failure is."""
+        with self._lock:
+            before = self._up.get(b.name)
+            self._up[b.name] = up
+            if before == up or (before is None and up):
+                return
+            if up:
+                sentence = f"LLM backend {b.name} is answering again; LLM calls go to it from now on."
+            else:
+                others = [o.name for o in self.backends
+                          if o is not b and self._up.get(o.name) is not False and o.down_until <= self._clock()]
+                then = (f"LLM calls go to {others[0]}" if others else
+                        "no LLM backend is left, so decisions use the rules (option 0, template wording)")
+                sentence = (f"LLM backend {b.name} stopped answering ({untrusted(why, 40)}); {then} until it "
+                            f"answers again. The run carries on.")
+            self._transitions.append({"backend": b.name, "up": up, "why": untrusted(why, 40), "sentence": sentence})
+
     # ---- internals
 
     def _ask(self, task, payload, schema, system, max_tokens) -> Optional[dict]:
@@ -288,6 +318,7 @@ class LLMClient:
                                                             max_tokens, remaining, attempt)
                 if status == "ok":
                     b.failures = 0
+                    self._mark(b, True, task)
                     return answer
                 if status not in _RETRYABLE:
                     break
@@ -301,6 +332,7 @@ class LLMClient:
                 b.down_until = self._clock() + BREAKER_COOLDOWN_S
                 b.failures = 0
                 self._log(task, b, "breaker_open", 0.0)
+                self._mark(b, False, status)
         if not tried:
             self._log(task, None, "all_backends_down", 0.0)
         return None
@@ -453,6 +485,13 @@ def new_scenario(log_path: Optional[Path] = None) -> None:
 
 def warmup() -> dict:
     return get_client().warmup()
+
+
+def pop_transitions() -> list[dict]:
+    """LLM-7: up/down changes of the default client since the last call ([] if no client was made)."""
+    with _default_lock:
+        c = _default
+    return c.pop_transitions() if c is not None else []
 
 
 # ---------------------------------------------------------------- manual check

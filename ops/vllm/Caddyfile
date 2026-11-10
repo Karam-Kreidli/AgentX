@@ -1,0 +1,29 @@
+# LLM-7: the HTTPS front. Tailscale Funnel terminates TLS on https://<vm>.<tailnet>.ts.net and
+# forwards to Caddy on 127.0.0.1:8080; Caddy caps the request size and forwards to vLLM on
+# 127.0.0.1:8000, which checks the API key. Nothing listens on a public interface.
+#
+#   caddy run --config ops/vllm/Caddyfile          (inside tmux: tmux new -s front)
+#   tailscale funnel --bg --https=443 http://127.0.0.1:8080
+#
+# Our largest request in a full run is ~3 KB, so 64 KB never blocks us and stops anyone
+# pushing huge prompts at the GPU. With an IP allowlist from the organizers, use
+# Caddyfile.allowlist instead (runbook, "Optional: IP allowlist").
+{
+	admin off
+	auto_https off
+}
+
+http://127.0.0.1:8080 {
+	bind 127.0.0.1
+	request_body {
+		max_size 64KB
+	}
+	@unknown not path /v1/models /v1/chat/completions /health
+	respond @unknown 404
+	reverse_proxy 127.0.0.1:8000 {
+		transport http {
+			dial_timeout 2s
+			response_header_timeout 60s
+		}
+	}
+}
