@@ -44,6 +44,7 @@ class Explainer:
         self.hours: dict[str, dict[str, float]] = {}
         self.last_t: Optional[float] = None
         self.last: Optional[WorldState] = None
+        self.blocks: dict[str, set] = {}        # YARD-6: every block that has held a ship's import boxes
 
     # ------------------------------------------------------------------ during the run
     def observe(self, state: WorldState) -> None:
@@ -59,8 +60,17 @@ class Explainer:
                         h = self.hours.setdefault(s.call_id, {c: 0.0 for c in CAUSES})
                         h[cause] += dt
             self.last, self.last_t = state, t
+            for s in state.ships:                # boxes are only placed while their ship is at a berth
+                if s.status in AT_BERTH:
+                    seen = self.blocks.setdefault(s.call_id, set())
+                    seen.update(c.yard_block for c in state.manifests.get(s.call_id, ())
+                                if c.direction == "import" and c.yard_block)
         except Exception:
             pass
+
+    def spread(self) -> dict[str, int]:
+        """YARD-6: in how many yard blocks each ship's import boxes were placed (ships with any)."""
+        return {cid: len(b) for cid, b in sorted(self.blocks.items()) if b}
 
     def replan(self, before: WorldState, after: WorldState) -> Optional[str]:
         """One sentence if this tick berthed a ship or re-split the cranes, else None."""

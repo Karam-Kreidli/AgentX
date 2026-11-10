@@ -41,10 +41,13 @@ from __future__ import annotations
 
 from typing import Optional
 
+from agents import yard as yard_rules
 from core import log as runlog
 from core.types import (BLOCK_EMPTY, BLOCK_IMDG, BLOCK_REEFER, BLOCK_STANDARD, CARGO_DRY, CARGO_IMDG,
                         CARGO_REEFER, EQ_AVAILABLE, EQ_OUT_OF_SERVICE, GRANTED, KNOWN_CARGO, REFUSED, RES_BERTH, RES_CRANES,
                         RES_TRUCKS, RES_YARD_SLOTS, TRIMMED, Grant, Option, Request, WorldState)
+
+DRY_IN_REEFER = "dry_in_reefer"      # YARD-6: free_space key: reefer slots dry boxes may use
 
 OPT_FORECAST = "follow_forecast"
 OPT_FCFS = "serve_all"
@@ -91,10 +94,12 @@ def unplaced_imports(state: WorldState, call_id: str) -> dict[str, int]:
 
 def free_space(state: WorldState) -> dict[str, int]:
     """Free slots per block family: H (IMDG), I/J (reefer), standard, G (empties)."""
-    free = {BLOCK_IMDG: 0, BLOCK_REEFER: 0, BLOCK_STANDARD: 0, BLOCK_EMPTY: 0}
+    free = {BLOCK_IMDG: 0, BLOCK_REEFER: 0, BLOCK_STANDARD: 0, BLOCK_EMPTY: 0, DRY_IN_REEFER: 0}
     for b in state.blocks:
         if b.block_type in free:
             free[b.block_type] += b.free
+        if b.block_type == BLOCK_REEFER:          # YARD-6: the share dry boxes may use (yard.reefer_keep)
+            free[DRY_IN_REEFER] += yard_rules.dry_room_in_reefer(b, b.free)
     return free
 
 
@@ -106,9 +111,14 @@ def fit(need: dict[str, int], free: dict[str, int]) -> int:
     free[BLOCK_REEFER] -= n_reefer
     dry = need.get(CARGO_DRY, 0)
     n_dry = 0
-    for kind in (BLOCK_STANDARD, BLOCK_EMPTY, BLOCK_REEFER):      # dry: standard, then G, then I/J
+    # YARD-6: reefer boxes take slots dry boxes could use too (they fill the same blocks first)
+    free[DRY_IN_REEFER] = min(free.get(DRY_IN_REEFER, free[BLOCK_REEFER] + n_reefer) - n_reefer, free[BLOCK_REEFER])
+    free[DRY_IN_REEFER] = max(0, free[DRY_IN_REEFER])
+    for kind in (BLOCK_STANDARD, BLOCK_EMPTY, DRY_IN_REEFER):     # dry: standard, then G, then I/J
         take = max(0, min(dry - n_dry, free[kind]))
         free[kind] -= take
+        if kind == DRY_IN_REEFER:
+            free[BLOCK_REEFER] -= take
         n_dry += take
     return n_imdg + n_reefer + n_dry
 

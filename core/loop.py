@@ -568,6 +568,9 @@ class Loop:
                     (self.run_dir / "unfinished.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
                 if st.anomalies:
                     s["final_state_anomalies"] = list(st.anomalies)[:20]
+                spread = self.explain.spread()      # YARD-6: blocks per ship (re-handles story)
+                s["yard_blocks_per_ship"] = spread
+                s["yard_blocks_per_ship_mean"] = round(sum(spread.values()) / len(spread), 2) if spread else None
         except Exception as e:
             s.setdefault("summary_error", f"honest turnaround failed: {type(e).__name__}"[:200])
         s["skeleton_exceptions"] = self.counts["exceptions"]
