@@ -9,6 +9,7 @@
 #   scorecard  tools/eval_all.py --all --no-llm --against main, on every workbook. Fails on any
 #              violation / refused call / breach, any crash, an action without a reason, a scenario
 #              over 5 min, fewer ships departed than main, honest turnaround > main + 3 %
+#              CORE-8: also runs --agent single (the baseline) on practice with the absolute checks only
 #   variants   CORE-7: tools/perturb.py --ci makes a fixed set of 4 workbooks (1 mixed, 1 no-shortage, 2 malformed)
 #              and tools/eval_all.py runs them with --fcfs: the same checks as the scorecard, plus the
 #              expectations in index.json (bad data never berthed / placed, each anomaly escalated once) and
@@ -130,6 +131,12 @@ step_scorecard() {
     elif [ "$r" -ne 0 ]; then
       result=1
     fi
+    # CORE-8: the single-agent baseline gets the same absolute checks (0 violations, crashes, missing
+    # reasons). No --against: main has no `single` until CORE-8 merges, and KPIs are not meant to match.
+    echo "--- scorecard (single-agent baseline): $wb"
+    mkdir -p "$dir/single"
+    "$PY" tools/eval_all.py --all --no-llm --agent single --data "$wb" --out "$dir/single" | tee "$dir/single/eval_all.txt"
+    [ "${PIPESTATUS[0]}" -ne 0 ] && result=1
   done
   return $result
 }

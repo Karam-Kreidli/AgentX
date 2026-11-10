@@ -24,12 +24,14 @@ from agents.berth import BerthAgent  # noqa: E402
 from agents.crane import CraneAgent  # noqa: E402
 from agents.trucks import TruckAgent  # noqa: E402
 from agents.yard import YardAgent  # noqa: E402
+from baselines.single_agent import SingleAgent  # noqa: E402
 from core.loop import Loop  # noqa: E402
 from core.skeleton import SkeletonAgent  # noqa: E402
 from llm import client as llm_client  # noqa: E402
 from vendor import TerminalAPI  # noqa: E402
 
 PRACTICE = [f"practice_0{i}" for i in range(1, 6)]
+AGENTS = ["multi", "skeleton", "single", "multi-nocoord"]
 DEFAULT_DATA = ROOT / "data" / "P2_Container_Terminal_Data.xlsx"
 
 
@@ -38,6 +40,8 @@ def make_agents(kind: str) -> list:
     covers the jobs no real agent does yet. 'skeleton' is the rules-only baseline."""
     if kind == "skeleton":
         return [SkeletonAgent()]
+    if kind == "single":                    # CORE-8: one planner for berth, crane, truck and yard
+        return [SingleAgent()]
     return [BerthAgent(), CraneAgent(), TruckAgent(), YardAgent()]
 
 
@@ -100,8 +104,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--key", type=Path, help="answer-key workbook, needed for hidden_* scenarios")
     p.add_argument("--runs", type=Path, default=ROOT / "runs", help="output folder (default: runs/)")
     p.add_argument("--no-llm", action="store_true", help="rules only: never call a language model")
-    p.add_argument("--agent", choices=["multi", "skeleton"], default="multi",
-                   help="multi: berth, crane, truck and yard agents; skeleton: rules-only")
+    p.add_argument("--agent", choices=AGENTS, default="multi",
+                   help="multi: berth, crane, truck and yard agents with the coordinator; skeleton: rules-only (FCFS); "
+                        "single: one planner (CORE-8); multi-nocoord: the four agents without the coordinator (CORE-8)")
     a = p.parse_args(argv)
 
     if not a.data.exists():
