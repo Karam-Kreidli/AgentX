@@ -20,8 +20,8 @@ behaviour); otherwise `grants[("yard_slots", call_id)]` slots, 0 if absent.
 
 A box with nowhere legal to go is never forced: it stays queued and is tried
 again next tick (the ship cannot discharge it until then), and the ship is
-escalated once. A box with an unknown cargo type is never placed and is
-escalated once.
+escalated once. A box with an unknown cargo type is never placed; each ship is
+escalated once per unknown cargo type, with the number of boxes.
 
 It only proposes; the loop sends each action through the guard and the executor.
 """
@@ -90,15 +90,20 @@ class YardAgent:
             if s.status not in (SHIP_BERTHED, SHIP_WORKING) or s.discharge_remaining <= 0:
                 continue
             todo: dict[str, list[str]] = {}
+            unknown: dict[str, int] = {}
             for c in state.manifests.get(s.call_id, ()):
                 if c.direction != "import" or c.yard_block:
                     continue
                 if c.cargo_type not in KNOWN_CARGO:
-                    self._escalate(f"cargo:{c.container_id}",
-                                   f"An import box of {s.call_id} has unknown cargo type "
-                                   f"{str(c.cargo_type)[:20]!r}; it is not placed.")
+                    kind = str(c.cargo_type)[:20]
+                    unknown[kind] = unknown.get(kind, 0) + 1
                     continue
                 todo.setdefault(c.cargo_type, []).append(c.container_id)
+            for kind, n in unknown.items():          # one escalation per ship and cargo type, not per box
+                self._escalate(f"cargo:{s.call_id}:{kind}",
+                               f"{n} import box{'es' if n != 1 else ''} of {s.call_id} "
+                               f"{'have' if n != 1 else 'has'} unknown cargo type {kind!r}; "
+                               f"{'they are' if n != 1 else 'it is'} not placed.")
 
             want = sum(len(v) for v in todo.values())
             if want:

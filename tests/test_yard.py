@@ -103,14 +103,19 @@ def test_ij_full_reefer_waits_and_is_never_put_in_a_standard_block():
 
 
 def test_unknown_cargo_is_not_placed_and_is_escalated_once():
-    s = world([ship()], boxes(2, "banana") + boxes(2))
+    s = world([ship(), ship("C2", "B2")],
+              boxes(30, "banana") + boxes(3, "kiwi") + boxes(2) + boxes(5, "banana", call="C2"))
     agent = YardAgent()
     actions, _ = agent.propose(s, [])
     placed = {c for a in actions for c in a.args["container_ids"]}
-    assert not any(c.startswith("B") for c in placed) and len(placed) == 2
-    assert sum("unknown cargo" in e for e in agent.escalations) == 2   # one per box
+    assert not any(c.startswith(("B", "K")) for c in placed) and len(placed) == 2
+    unknown = [e for e in agent.escalations if "unknown cargo" in e]
+    assert len(unknown) == 3                       # one per ship and cargo type, not one per box
+    assert any("30 import boxes of C1" in e and "'banana'" in e for e in unknown)
+    assert any("3 import boxes of C1" in e and "'kiwi'" in e for e in unknown)
+    assert any("5 import boxes of C2" in e for e in unknown)
     agent.propose(s, [])
-    assert sum("unknown cargo" in e for e in agent.escalations) == 2   # not repeated
+    assert sum("unknown cargo" in e for e in agent.escalations) == 3   # not repeated next tick
 
 
 def test_only_berthed_or_working_ships_with_work_left_and_unplaced_imports():

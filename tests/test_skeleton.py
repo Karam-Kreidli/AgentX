@@ -34,3 +34,18 @@ def test_practice_01_runs_clean(tmp_path):
     assert s["skeleton_exceptions"] == 0
     assert (tmp_path / "practice_01" / "actions.jsonl").exists()
     assert (tmp_path / "practice_01" / "decisions.jsonl").stat().st_size > 0
+
+
+def test_rules_only_yard_escalates_unknown_cargo_once_per_ship():
+    """Rules-only fallback: 20 boxes of unknown cargo give one escalation for their ship, not 20."""
+    from core.skeleton import SkeletonAgent
+    from tests.test_yard import boxes, ship, world
+    s = world([ship()], boxes(20, "banana") + boxes(2))
+    agent = SkeletonAgent(parts=("yard",))
+    actions, _ = agent.propose(s, [])
+    placed = {c for a in actions for c in a.args["container_ids"]}
+    assert len(placed) == 2 and not any(c.startswith("B") for c in placed)
+    unknown = [e for e in agent.escalations if "unknown cargo" in e]
+    assert len(unknown) == 1 and "20 import box(es) of C1" in unknown[0]
+    agent.propose(s, [])
+    assert sum("unknown cargo" in e for e in agent.escalations) == 1
