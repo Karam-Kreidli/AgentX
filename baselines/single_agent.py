@@ -168,9 +168,12 @@ class SingleAgent:
                 group = usable[i:i + n]
                 i += n
                 b = state.berth(s.berth)
-                bays = _bays(n, b.start_bay, b.end_bay) if b else None
-                if bays:
-                    want[s.call_id] = dict(zip(group, bays))
+                while n > 0 and b:                       # too many cranes for the berth's bays: use fewer
+                    bays = _bays(n, b.start_bay, b.end_bay)
+                    if bays:
+                        want[s.call_id] = dict(zip(group[:n], bays))
+                        break
+                    n -= 1
         pos, brk, target = plans_from_state(state, want)
         out = []
         for a in safe_crane_moves(pos, brk, target):

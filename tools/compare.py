@@ -8,7 +8,9 @@ Systems (all use the same guard, executor, validate, invariant monitor and rules
 only the decision logic differs):
     skeleton       FCFS rules (oldest ship first, first free berth, fixed cranes). Coordinator off.
     single         ONE planner for berth, crane, truck and yard (baselines/single_agent.py). Coordinator off.
-    multi-nocoord  our four agents without the coordinator (ablation: no negotiation, no admission control).
+    multi-nocoord  our four agents without negotiation (the coordinator is off: no grants, no options, no supervisor).
+                   Impossible-ship detection still runs inside the berth agent (admission.bound), so rules-only the
+                   coordinator changes actions but not the KPIs.
     multi          our four agents with the coordinator.
 
 Sets: practice (5 scenarios); variants (perturbed + no-shortage books, "v*"); malformed ("m*",
@@ -129,6 +131,11 @@ def markdown(card: dict) -> str:
             a = card["tables"][k][st]
             lines.append(f"| {names[k]} | " + " | ".join(c[1](a) for c in cols) + " |")
         lines.append("")
+    lines += ["Notes: honest TA counts ships that did not finish up to the end of the window; sim TA is the mean over "
+              "ships that departed only, so a system that departs fewer ships can look faster on it. "
+              "Rules-only, \"Multi\" and \"Multi, no coordinator\" give the same ships departed and turnaround: the "
+              "coordinator changes actions, not the KPIs, because impossible-ship detection runs inside the berth agent "
+              "either way.", ""]
     pr = card.get("paired") or {}
     if pr:
         lines += ["### Paired view on variant scenarios (first system against second)", "",
@@ -146,6 +153,18 @@ PALETTE = {"skeleton": "#8a8f98", "single": "#d98e04", "multi-nocoord": "#2f8f83
            LLM_KEY: "#7b4bb7"}
 
 
+def _nice_step(raw: float) -> float:
+    """A round tick step (1, 2, 5 x 10^n) at least as big as raw."""
+    import math
+    if raw <= 0:
+        return 1.0
+    mag = 10 ** math.floor(math.log10(raw))
+    for m in (1, 2, 5, 10):
+        if m * mag >= raw - 1e-12:
+            return float(m * mag)
+    return float(10 * mag)
+
+
 def svg_chart(card: dict, metric: str, title: str, unit: str) -> str:
     """Grouped bars: one group per practice scenario, one bar per system. Hand-written SVG (no plotting
     library is installed); colours come from CSS so it reads in light and dark."""
@@ -153,7 +172,9 @@ def svg_chart(card: dict, metric: str, title: str, unit: str) -> str:
     keys = [k for k in names if k in card["practice_rows"]]
     scen = sorted({r["label"] for k in keys for r in card["practice_rows"][k]})
     val = {(k, r["label"]): r.get(metric) for k in keys for r in card["practice_rows"][k] if not r.get("crashed")}
-    top = max([v for v in val.values() if v is not None] or [1]) * 1.12
+    tot = {(k, r["label"]): r.get("total") for k in keys for r in card["practice_rows"][k] if not r.get("crashed")}
+    step = _nice_step(max([v for v in val.values() if v is not None] or [1]) / 4)
+    top = step * 4
     W, H, L, R, T, B = 900, 460, 60, 20, 60, 90
     pw, ph = W - L - R, H - T - B
     gw = pw / len(scen)
@@ -167,7 +188,7 @@ def svg_chart(card: dict, metric: str, title: str, unit: str) -> str:
     for i in range(5):
         y = T + ph - ph * i / 4
         o.append(f'<line class="gr" x1="{L}" x2="{W - R}" y1="{y:.1f}" y2="{y:.1f}"/>')
-        o.append(f'<text class="mu" x="{L - 8}" y="{y + 4:.1f}" font-size="12" text-anchor="end">{_f(top * i / 4 / 1.12, 1)}</text>')
+        o.append(f'<text class="mu" x="{L - 8}" y="{y + 4:.1f}" font-size="12" text-anchor="end">{_f(step * i, 1)}</text>')
     for gi, sc in enumerate(scen):
         x0 = L + gi * gw + gw * 0.1
         for ki, k in enumerate(keys):
@@ -175,10 +196,11 @@ def svg_chart(card: dict, metric: str, title: str, unit: str) -> str:
             if v is None:
                 continue
             h = ph * v / top
+            lab = f"{v:g}/{tot[(k, sc)]}" if metric == "departed" and tot.get((k, sc)) else _f(v, 1)
             x, y = x0 + ki * bw, T + ph - h
             o.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw - 2:.1f}" height="{h:.1f}" fill="{PALETTE[k]}">'
                      f"<title>{escape(names[k])} {escape(sc)}: {_f(v)}{unit}</title></rect>")
-            o.append(f'<text class="tx" x="{x + (bw - 2) / 2:.1f}" y="{y - 4:.1f}" font-size="11" text-anchor="middle">{_f(v, 1)}</text>')
+            o.append(f'<text class="tx" x="{x + (bw - 2) / 2:.1f}" y="{y - 4:.1f}" font-size="11" text-anchor="middle">{lab}</text>')
         o.append(f'<text class="mu" x="{L + gi * gw + gw / 2:.1f}" y="{T + ph + 20}" font-size="12" text-anchor="middle">{escape(sc)}</text>')
     lx = L
     for k in keys:

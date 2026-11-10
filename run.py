@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-llm", action="store_true", help="rules only: never call a language model")
     p.add_argument("--agent", choices=AGENTS, default="multi",
                    help="multi: berth, crane, truck and yard agents with the coordinator; skeleton: rules-only (FCFS); "
-                        "single: one planner (CORE-8); multi-nocoord: the four agents without the coordinator (CORE-8)")
+                        "single: one planner (CORE-8); multi-nocoord: the four agents without negotiation (CORE-8)")
     a = p.parse_args(argv)
 
     if not a.data.exists():
