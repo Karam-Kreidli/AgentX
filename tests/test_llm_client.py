@@ -249,7 +249,7 @@ def test_no_backends_configured_returns_none(monkeypatch):
 
 
 def test_placeholder_url_from_env_example_is_ignored():
-    env = {"LLM_BASE_URL": "http://<vm-tailscale-ip>:8000/v1", "LLM_API_KEY": "k", "LLM_MODEL": "qwen"}
+    env = {"LLM_BASE_URL": "https://<vm>.<tailnet>.ts.net/v1", "LLM_API_KEY": "k", "LLM_MODEL": "qwen"}
     assert llm.backends_from_env(env) == []
 
 

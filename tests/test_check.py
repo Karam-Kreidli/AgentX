@@ -127,7 +127,7 @@ def test_secret_scan_catches_key_shapes(tmp_path, line):
     "LLM_API_KEY=",
     'LLM_API_KEY = os.environ.get("LLM_API_KEY", "")',
     "WORKBOOK_PASSPHRASE: ${{ secrets.WORKBOOK_PASSPHRASE }}",
-    "LLM_BASE_URL=http://<vm-tailscale-ip>:8000/v1",
+    "LLM_BASE_URL=https://<vm>.<tailnet>.ts.net/v1",
 ])
 def test_secret_scan_ignores_placeholders(tmp_path, line):
     p = tmp_path / "x.py"

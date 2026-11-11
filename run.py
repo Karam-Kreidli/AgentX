@@ -3,16 +3,24 @@
     python run.py --scenario practice_01
     python run.py --all
     python run.py --scenario hidden_01 --key path/to/P2_Container_Terminal_ANSWER_KEY.xlsx
+    python run.py --all-hidden --key path/to/P2_Container_Terminal_ANSWER_KEY.xlsx
+
+From Python (organizers who build the TerminalAPI themselves):
+    from run import run_agent
+    summary = run_agent(api, run_dir)
 
 Output per scenario in runs/<scenario>/:
     actions.jsonl    the toolkit's own action log (what the organizers score)
     decisions.jsonl  our decision log: what we did and why
     summary.json     run_summary() plus our honest turnaround
+The command line also leaves a copy of actions.jsonl where the toolkit writes it by default,
+runs/P2/<scenario>/actions.jsonl (relative to the current folder).
 """
 from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -32,7 +40,30 @@ from vendor import TerminalAPI  # noqa: E402
 
 PRACTICE = [f"practice_0{i}" for i in range(1, 6)]
 AGENTS = ["multi", "skeleton", "single", "multi-nocoord"]
-DEFAULT_DATA = ROOT / "data" / "P2_Container_Terminal_Data.xlsx"
+DATA_NAME = "P2_Container_Terminal_Data.xlsx"
+DEFAULT_DATA = ROOT / "data" / DATA_NAME
+TOOLKIT_LOG_DIR = Path("runs") / "P2"    # where TerminalAPI writes actions.jsonl when given no log_path
+
+
+def find_data(explicit: Path | None, key: Path | None = None, cwd: Path | None = None) -> Path | None:
+    """CORE-9 (D16): the data workbook. --data wins; else the first that exists of data/, the folder
+    of the key file, the current folder and toolskit/data/. None if nothing is found."""
+    if explicit:
+        return explicit
+    cwd = cwd or Path.cwd()
+    folders = [ROOT / "data"] + ([key.resolve().parent] if key else []) + [cwd, ROOT / "toolskit" / "data"]
+    for f in folders:
+        if (f / DATA_NAME).is_file():
+            return f / DATA_NAME
+    return None
+
+
+def hidden_scenarios(key: Path) -> list[str]:
+    """CORE-9 (D11): the scenario names in the answer key. Reads the `scenario` column of
+    Hidden_Vessels and nothing else; the names go to the loader, not to the agents."""
+    import pandas as pd
+    col = pd.read_excel(key, sheet_name="Hidden_Vessels", usecols=["scenario"])["scenario"]  # honest-play: ok launcher lists scenario names (D11); no agent sees the key
+    return sorted({str(x) for x in col.dropna()})
 
 
 def make_agents(kind: str) -> list:
@@ -45,6 +76,16 @@ def make_agents(kind: str) -> list:
     return [BerthAgent(), CraneAgent(), TruckAgent(), YardAgent()]
 
 
+def run_agent(api, run_dir: Path, agent: str = "multi") -> dict:
+    """CORE-9 (D12): play one scenario on a TerminalAPI the caller built, and return the summary.
+    Writes decisions.jsonl and summary.json into run_dir. The actions log goes wherever the api was
+    told to write it (the toolkit default, if the caller gave no log_path)."""
+    run_dir = Path(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    llm_client.new_scenario(run_dir / "llm_calls.jsonl")         # fresh call budget per scenario (LLM-2)
+    return Loop(api, run_dir, agents=make_agents(agent), coordinate=agent == "multi").run()
+
+
 def run_one(scenario: str, data: Path, key: Path | None, runs: Path, agent: str = "multi") -> dict:
     run_dir = runs / scenario
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -52,8 +93,7 @@ def run_one(scenario: str, data: Path, key: Path | None, runs: Path, agent: str 
     try:
         api = TerminalAPI(scenario, data_xlsx=str(data), key_xlsx=str(key) if key else None,
                           log_path=str(run_dir / "actions.jsonl"))
-        llm_client.new_scenario(run_dir / "llm_calls.jsonl")     # fresh call budget per scenario (LLM-2)
-        summary = Loop(api, run_dir, agents=make_agents(agent), coordinate=agent == "multi").run()
+        summary = run_agent(api, run_dir, agent)
     except Exception as e:      # SAFE-4: a scenario that can't even start still gets a summary.json
         _write_failed_summary(run_dir, scenario, e, time.perf_counter() - t0)
         raise
@@ -73,6 +113,21 @@ def _write_failed_summary(run_dir: Path, scenario: str, e: Exception, wall_s: fl
         (run_dir / "summary.json").write_text(json.dumps(stub, indent=2), encoding="utf-8")
     except Exception as w:
         print(f"[{scenario}] could not write summary.json: {type(w).__name__}: {w}", file=sys.stderr)
+
+
+def copy_toolkit_log(run_dir: Path, scenario: str) -> Path | None:
+    """CORE-9 (D10): leave a copy of actions.jsonl at the toolkit's default path. Never raises."""
+    src = run_dir / "actions.jsonl"
+    dst = TOOLKIT_LOG_DIR / scenario / "actions.jsonl"
+    try:
+        if not src.is_file() or (dst.exists() and dst.resolve() == src.resolve()):
+            return None
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        return dst
+    except Exception as e:
+        print(f"[{scenario}] could not copy actions.jsonl to {dst}: {type(e).__name__}: {e}", file=sys.stderr)
+        return None
 
 
 def print_table(rows: list[dict]) -> None:
@@ -100,7 +155,9 @@ def main(argv: list[str] | None = None) -> int:
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--scenario", help="e.g. practice_01 or hidden_01")
     g.add_argument("--all", action="store_true", help="run all 5 practice scenarios")
-    p.add_argument("--data", type=Path, default=DEFAULT_DATA, help="data workbook (default: data/...)")
+    g.add_argument("--all-hidden", action="store_true", help="run every scenario named in the answer key (needs --key)")
+    p.add_argument("--data", type=Path, default=None,
+                   help=f"data workbook (default: {DATA_NAME} in data/, next to the key, the current folder or toolskit/data/)")
     p.add_argument("--key", type=Path, help="answer-key workbook, needed for hidden_* scenarios")
     p.add_argument("--runs", type=Path, default=ROOT / "runs", help="output folder (default: runs/)")
     p.add_argument("--no-llm", action="store_true", help="rules only: never call a language model")
@@ -109,9 +166,23 @@ def main(argv: list[str] | None = None) -> int:
                         "single: one planner (CORE-8); multi-nocoord: the four agents without negotiation (CORE-8)")
     a = p.parse_args(argv)
 
-    if not a.data.exists():
-        p.error(f"data workbook not found: {a.data} (put the official workbook in data/)")
-    scenarios = PRACTICE if a.all else [a.scenario]
+    if a.all_hidden and not a.key:
+        p.error("--all-hidden needs --key")
+    if a.key and not a.key.is_file():
+        p.error(f"answer key not found: {a.key}")
+    a.data = find_data(a.data, a.key)
+    if a.data is None or not a.data.is_file():
+        p.error(f"data workbook not found: {a.data or DATA_NAME} (put the official workbook in data/)")
+    print(f"data workbook: {a.data}")
+    if a.all_hidden:
+        try:
+            scenarios = hidden_scenarios(a.key)
+        except Exception as e:
+            p.error(f"could not read the scenario names from {a.key}: {type(e).__name__}: {e}")
+        if not scenarios:
+            p.error(f"no scenarios in Hidden_Vessels of {a.key}")
+    else:
+        scenarios = PRACTICE if a.all else [a.scenario]
     if any(s.startswith("hidden") for s in scenarios) and not a.key:
         p.error("hidden scenarios need --key")
 
@@ -123,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     for s in scenarios:
         try:
             rows.append(run_one(s, a.data, a.key, a.runs, a.agent))
+            copy_toolkit_log(a.runs / s, s)
         except Exception as e:  # a broken scenario must not stop the others
             print(f"[{s}] could not run: {type(e).__name__}: {e}", file=sys.stderr)
     if rows:
