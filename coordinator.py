@@ -11,7 +11,8 @@ never places more than it was granted in the same round.
 Yard slots (the bottleneck):
   1. YARD-3's budgets first: a written-off or impossible ship gets 0 (reason from the forecast).
   2. Then the space actually free, per cargo group, in the goal-ladder order: ships that are
-     not written off, by arrival (first come, first served). YARD-3 found that this order
+     not written off, fewest boxes still to place first (yard.space_order: least_left, YARD-7;
+     "arrival" gives first come, first served), then by arrival. YARD-3 found that this order
      finishes the most ships unless writing one off is predicted to finish strictly more.
      Space follows the yard rules: IMDG -> H, reefer -> I/J, dry -> standard, then G, then I/J.
      The yard agent fills it in the same order, so a grant is exactly what it can place.
@@ -43,6 +44,7 @@ from typing import Optional
 
 from agents import yard as yard_rules
 from core import log as runlog
+from core import params
 from core.types import (BLOCK_EMPTY, BLOCK_IMDG, BLOCK_REEFER, BLOCK_STANDARD, CARGO_DRY, CARGO_IMDG,
                         CARGO_REEFER, EQ_AVAILABLE, EQ_OUT_OF_SERVICE, GRANTED, KNOWN_CARGO, REFUSED, RES_BERTH, RES_CRANES,
                         RES_TRUCKS, RES_YARD_SLOTS, TRIMMED, Grant, Option, Request, WorldState)
@@ -151,9 +153,13 @@ def _yard(reqs: list[Request], state: WorldState, order: dict) -> tuple[list[Gra
 
     free = free_space(state)
     grants = []
+    # yard.space_order: "least_left" serves the ship with the fewest boxes still to place first, so a ship
+    # near the end finishes instead of every waiting ship getting a little; "arrival" is first come first served.
+    least_left = params.get("yard.space_order") == "least_left"
+    left = {r.call_id: sum(unplaced_imports(state, r.call_id).values()) for r in reqs} if least_left else {}
     ranked = sorted(reqs, key=lambda r: (budgets is not None and budgets.get(r.call_id, 1) == 0
                                          and not (serve_all and r.call_id in judged),
-                                         -r.priority, order.get(r.call_id, 1e9), r.call_id))
+                                         -r.priority, left.get(r.call_id, 0), order.get(r.call_id, 1e9), r.call_id))
     for r in ranked:
         need = unplaced_imports(state, r.call_id)
         asked = max(0, r.amount)

@@ -31,6 +31,7 @@ SPEC: dict[str, tuple[Any, tuple]] = {
     "yard.soft_fill": (0.85, (0.5, 1.0)),        # YARD-6: keep standard blocks at or under this while other room exists
     "yard.prefer": ("nearest", ("nearest", "together")),   # YARD-6: nearest block, or the ship's own blocks first
     "yard.reefer_keep": (0.0, (0.0, 1.0)),       # YARD-6: share of each reefer block dry boxes may not use
+    "yard.space_order": ("arrival", ("arrival", "least_left")),   # YARD-7: who gets scarce yard space first
 }
 
 _values: Optional[dict] = None

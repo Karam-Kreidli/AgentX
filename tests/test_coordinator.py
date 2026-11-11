@@ -62,6 +62,15 @@ def world(ships, containers, free=None, trucks=(), cranes=()):
                       MappingProxyType({k: tuple(v) for k, v in by_call.items()}), BERTHS)
 
 
+@pytest.fixture(autouse=True)
+def _arrival_order(monkeypatch):
+    """These tests pin the coordinator's mechanics in first-come-first-served order; the order that
+    config/params.yaml chooses (yard.space_order) is tested in tests/test_yard7.py."""
+    from core import params
+    real = params.get
+    monkeypatch.setattr(params, "get", lambda k: "arrival" if k == "yard.space_order" else real(k))
+
+
 def yard_req(cid, n, priority=1.0):
     return Request("yard", "yard_slots", n, cid, priority, f"{n} boxes of {cid}")
 
