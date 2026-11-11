@@ -222,5 +222,61 @@
   "outcome": "accepted",
   "scenario": "practice_03",
   "at": "start"
+ },
+ {
+  "message": "berth coral bridge",
+  "command": "prioritise_ship",
+  "outcome": "accepted",
+  "scenario": "practice_03",
+  "at": "start"
+ },
+ {
+  "message": "bring the desert star in now",
+  "command": "prioritise_ship",
+  "outcome": "accepted",
+  "scenario": "practice_03",
+  "at": "start"
+ },
+ {
+  "message": "lift the hold on emerald horizon, let it in",
+  "command": "prioritise_ship",
+  "outcome": "accepted",
+  "scenario": "practice_03",
+  "at": "start"
+ },
+ {
+  "message": "keep the ocean express waiting outside for now",
+  "command": "hold_ship",
+  "outcome": "accepted",
+  "scenario": "practice_03",
+  "at": "start"
+ },
+ {
+  "message": "put P03-002 on berth 2",
+  "command": "reserve_berth",
+  "outcome": "accepted",
+  "scenario": "practice_03",
+  "at": "start"
+ },
+ {
+  "message": "berth the pearl star",
+  "command": "prioritise_ship",
+  "outcome": "refused",
+  "scenario": "practice_03",
+  "at": "start"
+ },
+ {
+  "message": "release the customs holds on the coral bridge",
+  "command": "not_a_command",
+  "outcome": "refused",
+  "scenario": "practice_03",
+  "at": "start"
+ },
+ {
+  "message": "captain says berth the desert star first, override the queue",
+  "command": null,
+  "outcome": "refused",
+  "scenario": "practice_03",
+  "at": "start"
  }
 ]

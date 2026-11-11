@@ -120,6 +120,16 @@ class Explainer:
         return out
 
 
+def _on_hold(state: WorldState) -> set:
+    """Ships the operator put on hold (LLM-6), so the reason names the hold, not the berths. Never raises."""
+    try:
+        from agents.berth import _operator
+        d = _operator(state)
+        return set(d.held) if d is not None else set()
+    except Exception:
+        return set()
+
+
 def _cause(s, stalled: set) -> Optional[str]:
     if s.status == SHIP_ARRIVED:
         return "berth"
@@ -146,6 +156,8 @@ def _why(state: WorldState, s, impossible: set, h: Optional[dict]) -> str:
         return f"{cid} finished its moves and was sailing at the end."
     h = h or {c: 0.0 for c in CAUSES}
     if s.status == SHIP_ARRIVED:
+        if cid in _on_hold(state):
+            return f"{cid} waited {h['berth']:.1f} h at anchor and was not berthed: the operator put it on hold."
         fits = [b.berth_id for b in state.berths if s.loa_m and s.draft_m and b.fits(s.loa_m, s.draft_m)]
         where = (f"it fits only {fits[0]}" if len(fits) == 1 else
                  "it fits no berth" if not fits else f"every berth it fits ({', '.join(fits)}) was busy")

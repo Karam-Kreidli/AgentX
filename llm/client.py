@@ -55,6 +55,7 @@ REASONING_MAX_TOKENS = 800    # gpt-oss counts its (low-effort) reasoning agains
 BREAKER_FAILS = 2             # consecutive failed asks before a backend is skipped
 BREAKER_COOLDOWN_S = 60.0
 MAX_RETRY_AFTER_S = 2.0       # never wait longer than this for a 429
+LOG_TEXT_MAX = 4000           # llm_calls.jsonl keeps this many characters of what was sent and of the reply
 WARMUP_TIMEOUT_S = 20.0       # first contact may be slow (e.g. Tailscale waking an idle link)
 KEEPALIVE_S = 300.0           # keep the connection open between calls so later calls skip setup
 
@@ -388,24 +389,26 @@ class LLMClient:
             content = data["choices"][0]["message"].get("content")
         except Exception:
             return self._done(task, b, "invalid_json", t0, attempt)
+        io = {"sent": user, "reply": content}
         if not content or not str(content).strip():
-            return self._done(task, b, "empty", t0, attempt, usage=usage)
+            return self._done(task, b, "empty", t0, attempt, usage=usage, **io)
         try:
             obj = json.loads(_strip_fences(str(content)))
         except ValueError:
-            return self._done(task, b, "invalid_json", t0, attempt, usage=usage)
+            return self._done(task, b, "invalid_json", t0, attempt, usage=usage, **io)
         try:
             answer = schema.model_validate(obj).model_dump(mode="json")
         except ValidationError:
-            return self._done(task, b, "invalid_schema", t0, attempt, usage=usage)
-        self._done(task, b, "ok", t0, attempt, usage=usage)
+            return self._done(task, b, "invalid_schema", t0, attempt, usage=usage, **io)
+        self._done(task, b, "ok", t0, attempt, usage=usage, **io)
         return answer, "ok", None
 
-    def _done(self, task, b, status, t0, attempt, *, retry_after=None, usage=None, error=None):
-        self._log(task, b, status, self._clock() - t0, attempt=attempt, usage=usage, error=error)
+    def _done(self, task, b, status, t0, attempt, *, retry_after=None, usage=None, error=None, sent=None, reply=None):
+        self._log(task, b, status, self._clock() - t0, attempt=attempt, usage=usage, error=error, sent=sent, reply=reply)
         return None, status, retry_after
 
-    def _log(self, task, b: Optional[Backend], status, latency, *, attempt=0, usage=None, error=None):
+    def _log(self, task, b: Optional[Backend], status, latency, *, attempt=0, usage=None, error=None,
+             sent: Optional[str] = None, reply: Optional[str] = None):
         rec = {
             "ts": round(time.time(), 3), "task": task, "backend": b.name if b else None,
             "model": b.model if b else None, "attempt": attempt, "status": status,
@@ -415,6 +418,10 @@ class LLMClient:
         }
         if error:
             rec["error"] = error[:60]
+        if sent is not None:            # the data we sent (already sanitized; the system prompt is the task's prompt file)
+            rec["sent"] = sent[:LOG_TEXT_MAX]
+        if reply is not None:           # what the model answered, word for word, before any checking
+            rec["reply"] = str(reply)[:LOG_TEXT_MAX]
         with self._lock:
             self.records.append(rec)
             if len(self.records) > 5000:
