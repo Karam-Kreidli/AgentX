@@ -32,11 +32,13 @@ If that prints a table with `viol 0` and exits 0, the install works.
 
 **Data workbook.** Without `--data`, `run.py` looks for `P2_Container_Terminal_Data.xlsx` in `data/`, then
 next to the key file, then the current folder, then `toolskit/data/`. It prints the file it used. The
-agent never opens the workbook or the key; only the toolkit does, through `run.py`.
+agent never opens the workbook or the key; only the toolkit does, through `run.py`. For `--all-hidden`,
+`run.py` itself reads the scenario names from the key (nothing else) and passes them to the toolkit.
 
 **No LLM.** `--no-llm` never calls a model. Without it, the run uses the LLM named in `.env` and falls back
 to rules-only by itself if the endpoint is down, slow or returns garbage. Both give a valid run; the LLM only
-chooses between options the code made. Keys live in `.env` only (git-ignored); never put them in a file that is committed.
+chooses between options the code made. Check the model first with `python ops/vllm/healthcheck.py`
+(see `ops/vllm/runbook.md`); a wrong `LLM_BASE_URL` silently gives a rules-only run. Keys live in `.env` only (git-ignored); never put them in a file that is committed.
 
 **Exit code.** 0 if every scenario ran and has no violations; 1 otherwise.
 
@@ -103,7 +105,8 @@ agents/           berth, crane, crane_moves, yard, trucks, admission, stall, opt
 coordinator.py    negotiation + admission control (CORE-5)
 guard.py          hard-rule checks (SAFE-1)
 llm/              client, supervisor, voice, operator
-ops/vllm/         model server scripts (no secrets)
+config/           params.yaml (tunable parameters)
+ops/vllm/         model server scripts, runbook.md (no secrets)
 baselines/        single-agent comparison (CORE-8)
 tools/            eval_all, perturb, compare, timeline, check.sh
 vendor/           organizer toolkit, unmodified
