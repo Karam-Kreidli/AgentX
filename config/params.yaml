@@ -24,3 +24,6 @@ yard:
                        #   YARD-6: same results either way: once the yard is full, free slots open one block at a time
   reefer_keep: 0.0     # share of each reefer block (I/J) kept for reefers: dry boxes overflow into the rest only
                        #   YARD-6: 0.25 and 0.5 cost 2 ships on practice and 6 on perturbed: dry overflow into I/J pays
+  space_order: least_left   # who gets scarce yard space first: least_left (fewest boxes still to place) or arrival
+                       #   YARD-7: least_left 0.2-0.45 h faster on practice and perturbed, also on a held-out seed;
+                       #   no ship lost in any scenario (default arrival)

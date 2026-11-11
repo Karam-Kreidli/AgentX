@@ -9,8 +9,8 @@ only the decision logic differs):
     skeleton       FCFS rules (oldest ship first, first free berth, fixed cranes). Coordinator off.
     single         ONE planner for berth, crane, truck and yard (baselines/single_agent.py). Coordinator off.
     multi-nocoord  our four agents without negotiation (the coordinator is off: no grants, no options, no supervisor).
-                   Impossible-ship detection still runs inside the berth agent (admission.bound), so rules-only the
-                   coordinator changes actions but not the KPIs.
+                   Without the coordinator, yard space goes to ships in the order they come; with it, to the ship
+                   with the fewest boxes still to place (yard.space_order, YARD-7).
     multi          our four agents with the coordinator.
 
 Sets: practice (5 scenarios); variants (perturbed + no-shortage books, "v*"); malformed ("m*",
@@ -133,9 +133,8 @@ def markdown(card: dict) -> str:
         lines.append("")
     lines += ["Notes: honest TA counts ships that did not finish up to the end of the window; sim TA is the mean over "
               "ships that departed only, so a system that departs fewer ships can look faster on it. "
-              "Rules-only, \"Multi\" and \"Multi, no coordinator\" give the same ships departed and turnaround: the "
-              "coordinator changes actions, not the KPIs, because impossible-ship detection runs inside the berth agent "
-              "either way.", ""]
+              "The gap between \"Multi\" and \"Multi, no coordinator\" comes from the coordinator giving scarce yard "
+              "space to the ship with the fewest boxes still to place, so ships near the end finish sooner.", ""]
     pr = card.get("paired") or {}
     if pr:
         lines += ["### Paired view on variant scenarios (first system against second)", "",
