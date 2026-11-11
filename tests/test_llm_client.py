@@ -12,6 +12,7 @@ import pytest
 
 from llm import client as llm
 from llm.client import Backend, LLMClient, sanitize, untrusted
+from llm.client import LOG_TEXT_MAX
 from llm.schemas import OperatorCommand, VoiceLine, choice_model
 
 KEY_LOCAL = "sk-local-SECRET-1234567890"
@@ -249,7 +250,7 @@ def test_no_backends_configured_returns_none(monkeypatch):
 
 
 def test_placeholder_url_from_env_example_is_ignored():
-    env = {"LLM_BASE_URL": "http://<vm-tailscale-ip>:8000/v1", "LLM_API_KEY": "k", "LLM_MODEL": "qwen"}
+    env = {"LLM_BASE_URL": "https://<vm>.<tailnet>.ts.net/v1", "LLM_API_KEY": "k", "LLM_MODEL": "qwen"}
     assert llm.backends_from_env(env) == []
 
 
@@ -277,17 +278,28 @@ def test_never_raises_even_on_unserialisable_payload():
 
 # ---------------------------------------------------------------- logging and sanitising
 
-def test_log_has_metrics_but_no_keys_or_prompts(tmp_path):
+def test_log_has_metrics_data_and_reply_but_no_keys_or_system_prompt(tmp_path):
     log = tmp_path / "llm_calls.jsonl"
     fake = Fake(local=[reply("bad"), reply(GOOD)])
     c = make(fake, log_path=log)
-    c.ask("supervisor", {"secret_vessel": "MAERSK ALBA"}, SCHEMA)
+    c.ask("supervisor", {"vessel": "MAERSK ALBA"}, SCHEMA, system="SYSTEM-PROMPT-MARKER")
     text = log.read_text()
-    assert KEY_LOCAL not in text and KEY_GROQ not in text and "MAERSK" not in text
+    assert KEY_LOCAL not in text and KEY_GROQ not in text and "SYSTEM-PROMPT-MARKER" not in text
     lines = [json.loads(x) for x in text.splitlines()]
     assert [x["status"] for x in lines] == ["invalid_json", "ok"]
-    assert {"task", "backend", "model", "latency_s", "prompt_tokens", "completion_tokens"} <= set(lines[1])
+    assert {"task", "backend", "model", "latency_s", "prompt_tokens", "completion_tokens", "sent", "reply"} <= set(lines[1])
+    assert lines[0]["reply"] == "bad"                                  # the model's words, even when unusable
+    assert json.loads(lines[1]["reply"]) == json.loads(GOOD)
+    assert "MAERSK ALBA" in lines[1]["sent"]                           # the (sanitized) data it was shown
     assert KEY_LOCAL not in repr(c.backends)
+
+
+def test_log_text_is_capped(tmp_path):
+    log = tmp_path / "llm_calls.jsonl"
+    c = make(Fake(local=[reply(GOOD)]), log_path=log)
+    c.ask("supervisor", {"v": ["x" * 70] * 200}, SCHEMA)
+    rec = json.loads(log.read_text().splitlines()[0])
+    assert len(rec["sent"]) <= LOG_TEXT_MAX
 
 
 def test_untrusted_strips_control_chars_and_caps_length():

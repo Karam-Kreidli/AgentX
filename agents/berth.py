@@ -151,7 +151,11 @@ class BerthAgent:
                 f"{s.call_id} has waited {waited:.1f} h with {s.remaining_moves} moves to do; {b.berth_id} is "
                 f"{why} ({b.length_m:g} m for LOA {s.loa_m:g} m + 20 m, depth {b.max_draft_m:g} m for "
                 f"draft {s.draft_m:g} m)."))
+        d = _operator(state)
+        on_hold = set(d.held) if d is not None else set()
         for s in rank(state, [x for x in state.ships if x.status == SHIP_ARRIVED and _valid(x)]):
+            if s.call_id in on_hold:        # the operator put it on hold: it does not ask for a berth at all
+                continue
             if s.call_id not in chosen and any(b.fits(s.loa_m, s.draft_m) for b in state.berths):
                 requests.append(Request(AGENT, RES_BERTH, 1, s.call_id, 0.1,
                                         f"{s.call_id} has arrived but no free berth fits it yet."))

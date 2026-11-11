@@ -255,18 +255,20 @@ def _good_reader(d):
     berth = next((f"B{n}" for w, n in (("berth 1", 1), ("b1", 1), ("berth 2", 2), ("b2", 2), ("berth three", 3),
                                         ("b3", 3)) if w in m), None)
     harmful = any(w in m for w in ("override", "system:", "ignore all", "admin", "suspended", "developer",
-                                   "customs office", "qc2", "block", "cranes", "speed up", "status", "thanks"))
+                                   "customs", "qc2", "block", "cranes", "speed up", "status", "thanks"))
     if harmful:
         return cmd("not_a_command")
     if "approve" in m:
         return cmd("approve_escalation")
     if "decline" in m:
         return cmd("decline_escalation")
-    if "hold" in m or "don't berth" in m:
+    if any(w in m for w in ("lift the hold", "let it in", "bring", "let ")) and ship:   # wants the ship in
+        return cmd("prioritise_ship", ship)
+    if "hold" in m or "don't berth" in m or "waiting" in m:
         return cmd("hold_ship", ship)
     if "keep" in m or "reserve" in m or ("berth" in m and berth and ship):
         return cmd("reserve_berth", ship if "free" not in m else None, berth)
-    if "priorit" in m or "jump the queue" in m:
+    if "priorit" in m or "jump the queue" in m or (m.startswith("berth") and ship):
         return cmd("prioritise_ship", ship)
     return cmd("not_a_command")
 
@@ -333,3 +335,22 @@ def test_loop_keeps_a_deferred_message_for_the_next_tick(tmp_path, monkeypatch):
     assert loop.operator_queue == []
     notes = [json.loads(x) for x in (tmp_path / "decisions.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [n["choice"] for n in notes if n["agent"] == "operator"] == ["command:hold_ship"]
+
+
+# ---------------------------------------------------------------- holds seen everywhere
+
+def test_a_held_ship_does_not_ask_the_coordinator_for_a_berth():
+    from agents.berth import BerthAgent
+    st = world(ship("WAIT"), ship("OTHER"))
+    O.apply(O.Command("hold_ship", "WAIT"), st)
+    _, requests = BerthAgent().propose(st, [])
+    assert "WAIT" not in {r.call_id for r in requests}
+    assert "OTHER" in {r.call_id for r in requests}
+
+
+def test_the_end_of_run_reason_names_the_operator_hold():
+    from core import explain
+    st = world(ship("WAIT"))
+    O.apply(O.Command("hold_ship", "WAIT"), st)
+    why = explain._why(st, st.ships[0], set(), {c: 0.0 for c in explain.CAUSES})
+    assert "operator put it on hold" in why and "busy" not in why
