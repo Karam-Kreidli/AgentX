@@ -257,6 +257,21 @@ table.big{width:100%;border-collapse:collapse;margin:16px 0 26px;font-size:14px;
   .page{min-height:0} .fld{grid-template-columns:minmax(0,1fr);gap:6px}
 }
 @media (prefers-reduced-motion:reduce){.msgs tr.new td{animation:none}}
+.kpibox{overflow-x:auto;margin:16px 0 6px}
+table.kpi{margin:0}
+table.kpi th{text-align:right;white-space:nowrap}
+table.kpi th:first-child{text-align:left}
+table.kpi td:first-child{font-weight:600;white-space:normal;min-width:230px}
+table.kpi td:first-child small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+table.kpi td.best{font-weight:800;color:var(--green)}
+table.kpi tr.grp td{background:var(--panel-2);color:var(--muted);font-family:var(--sans);font-weight:700;font-size:12px;text-align:left;padding:7px 14px}
+.kpinote{font-size:12.5px;margin:0 0 22px}
+.mini{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+.mini th{font-weight:600;color:var(--muted);font-size:11.5px;text-align:right;padding:0 0 4px 4px;white-space:nowrap}
+.mini th:first-child{text-align:left;padding-left:0}
+.mini td{padding:5px 0 5px 4px;border-top:1px solid var(--line);text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.mini td:first-child{text-align:left;font-family:var(--sans);color:var(--muted);padding-left:0}
+.mini td.best{color:var(--green);font-weight:600}
 
 /* ---- daylight theme: warm paper background, white rounded cards, harbour blue + container orange ---- */
 :root{
@@ -511,6 +526,8 @@ table.big{border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow);border
       <div style="display:flex;justify-content:space-between;align-items:baseline"><h3>Score</h3><span class="muted" style="font-size:12px" id="cmpat"></span></div>
       <table class="score"><thead><tr><th>Strategy</th><th>Sailed</th><th>Avg h</th><th>Moves/h</th></tr></thead><tbody id="scoreb"></tbody></table>
       <div id="delta" hidden></div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:14px"><h3>Other KPIs</h3><a class="add" href="#results" style="font-size:12px">All KPIs →</a></div>
+      <table class="mini"><thead id="minih"></thead><tbody id="minib"></tbody></table>
     </section>
     <section id="judge">
       <h3>Disruption</h3>
@@ -554,7 +571,8 @@ table.big{border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow);border
 <section class="page" id="p-results" hidden>
   <div class="res">
     <header><div><h2>Results</h2><p id="resnote">Start a run to compare the strategies.</p></div></header>
-    <table class="big"><thead><tr><th>Strategy</th><th>Status</th><th>Ships sailed</th><th>Avg turnaround (h)</th><th>vs first come, first served</th><th>Crane moves/h</th><th>Decisions</th><th>Refused</th><th>Blocked</th><th>Rule breaks</th></tr></thead><tbody id="resb"></tbody></table>
+    <div class="kpibox"><table class="big kpi" id="kpit"><tbody id="resb"></tbody></table></div>
+    <p class="muted kpinote" id="kpinote"></p>
     <div class="figs">
       <div class="fig"><div class="hd"><h3>Average turnaround as the days go by</h3><span class="note">ships still in port count up to the current time</span></div><div class="cv"><canvas id="linec"></canvas></div></div>
       <div class="fig"><div class="hd"><h3>Berth timeline per strategy</h3><span class="note">dotted: waiting at anchor · bar: at berth · red: crane out of service</span></div><div class="gantts" id="gantts"></div></div>
@@ -794,7 +812,7 @@ const SHORT={multi:"VerteX",nocoord:"No coordinator",single:"Single agent",fcfs:
 let META=null, SYS={}, order=[], watching="multi", es=null, setup=null, mode="idle", lastReq=null, endT=null;
 function newSys(k,label){
   return {key:k,label,T:[],F:[],nowT:0,arr:{},dep:{},moves0:null,movesDone:0,craneH:0,lastT:0,lastWork:0,
-    msgs:[],pending:{},rounds:new Set(),dec:0,ref:0,blk:0,lastWall:0,done:null,err:null,
+    msgs:[],pending:{},rounds:new Set(),dec:0,ref:0,blk:0,esc:0,llmN:0,kpi:null,lastWall:0,done:null,err:null,
     placeAt:META.ships.map(()=>[]),oos:META.cranes.map(()=>[]),hist:[],nextH:0};
 }
 const sidx=id=>META.ships.findIndex(s=>s.id===id);
@@ -857,6 +875,7 @@ function onDec(S,r){
   const alerts={ship_stalled:"Stall watch",escalate:"Escalation",llm_down:"Model",llm_up:"Model",CRITICAL:"Safety monitor",exception:"Loop",anomaly:"Data check"};
   if(ch.startsWith("command:")){addMsg(S,{tick:r.tick,t:r.t,fk:"operator",from:"Operator channel",to:"Agents",text:`${esc(ch.slice(8).replace(/_/g," "))}: ${esc(r.reason)}`,out:["accepted","ok"],why:"The model turned the message into this fixed command; our rules checked it before the agents use it.",kind:"alert"});return}
   if(ch==="escalate"&&/^Operator message/.test(String(r.reason))){addMsg(S,{tick:r.tick,t:r.t,fk:"operator",from:"Operator channel",to:"Operator",text:esc(r.reason),out:["not done","no"],why:"Nothing was changed. The message could only have become one of five fixed commands, and every action still goes through the rule check.",kind:"alert"});return}
+  if(alerts[ch]&&ch!=="llm_up"&&ch!=="llm_down")S.esc++;
   if(alerts[ch]){const txt={llm_down:"went offline; agents carry on with rules",llm_up:"is back online"}[ch];
     addMsg(S,{tick:r.tick,t:r.t,fk:"alert",from:alerts[ch],to:"Operator",text:txt||esc(r.reason),out:[ch==="llm_up"?"info":"alert",ch==="llm_up"?"ok":"no"],why:txt?esc(r.reason||""):"",kind:"alert"});return}
   if(r.agent==="loop"&&ch==="replan")addMsg(S,{tick:r.tick,t:r.t,fk:"loop",to:"Agents",text:esc(r.reason),out:["",""],why:"",kind:"sys"});
@@ -865,6 +884,7 @@ function onDec(S,r){
 const LTASK={operator:"Operator channel",supervisor:"Coordinator",voice:"Negotiation log",warmup:"Connection check"};
 function pretty(s){try{return JSON.stringify(JSON.parse(s),null,2)}catch(_){return String(s??"")}}
 function onLLM(S,r){
+  S.llmN++;
   let gist="", rep=null; try{rep=JSON.parse(r.reply)}catch(_){}
   if(r.status!=="ok")gist=`call failed: ${r.status.replace(/_/g," ")}${r.reply!=null?" (reply could not be used)":""}`;
   else if(r.task==="operator"&&rep)gist=`reads the message as <b>${esc(String(rep.command||"").replace(/_/g," "))}</b>${rep.ship?" · ship "+esc(names(rep.ship)):""}${rep.berth?" · berth "+esc(rep.berth):""}: “${esc(names(rep.reason||""))}”`;
@@ -933,7 +953,7 @@ function drawScore(){
   if(!META)return; const t=cmpTime(), allFin=order.every(k=>SYS[k].done);
   $("#cmpat").textContent=allFin?"final":"at "+stamp(t);
   $("#scoreb").innerHTML=order.map(k=>{const S=SYS[k], fin=allFin&&!S.err, h=fin?S.done.honest_turnaround_h:honestAt(S,t), dep=fin?S.done.vessels_departed:depAt(S,t);
-    const mph=S.done&&!S.err?S.done.crane_moves_per_hour:(S.craneH>0?S.movesDone/S.craneH:null);
+    const mph=kv(S,"crane_moves_per_hour")??(S.craneH>0?S.movesDone/S.craneH:null);   // the simulator's own figure
     const sub=S.err?"stopped: error":S.done?"finished":!S.T.length?"starting…":mode==="stopped"?"stopped":stamp(S.nowT);
     return `<tr class="${k==="multi"?"us":""}"><td><i class="sw" style="background:${SCOL[k]}"></i>${esc(SHORT[k]||S.label)}<small>${sub}</small></td><td>${dep}/${META.ships.length}</td><td>${h==null?"–":h.toFixed(1)}</td><td>${mph==null?"–":mph.toFixed(1)}</td></tr>`}).join("");
   const us=SYS.multi, base=SYS.fcfs||SYS.single||SYS.nocoord, d=$("#delta");
@@ -957,17 +977,48 @@ function bindRun(S){
 $("#watch").addEventListener("click",e=>{const b=e.target.closest("button[data-k]"); if(b&&SYS[b.dataset.k]){watching=b.dataset.k;bindRun(SYS[watching])}});
 
 /* ====================================================================== results page */
+/* every KPI the simulator reports, plus our own counters; final numbers once a run has finished */
+const KPIS=[
+  ["Scored by the simulator"],
+  ["Ships sailed","",S=>{const v=kv(S,"vessels_departed"),n=kv(S,"vessels_total")??META.ships.length; return v==null?null:{n:v,txt:`${v}/${n}`}},"up"],
+  ["Average turnaround of sailed ships (h)","the simulator's figure; ships still in port are left out",S=>num(kv(S,"avg_turnaround_h")),"down"],
+  ["Organizers' first-come baseline, same ships (h)","from the scenario's baseline sheet, for comparison",S=>num(kv(S,"fcfs_baseline_avg_turnaround_h_same_calls")),null],
+  ["Crane moves per hour","",S=>num(kv(S,"crane_moves_per_hour")),"up"],
+  ["Truck idle hours","trucks in service but not working a ship",S=>num(kv(S,"truck_idle_hours")),"down"],
+  ["Placements into blocks over 85 % full","a yard-pressure measure, not a count of re-handles",S=>num(kv(S,"placements_into_blocks_over_85pct"),0),"down"],
+  ["Import boxes delivered","boxes that left the terminal to their owners",S=>num(kv(S,"import_boxes_delivered"),0),"up"],
+  ["Rule breaks","violations the simulator recorded",S=>num(S.done&&!S.err?(S.done.violations||[]).length:S.kpi?S.kpi.violations:null,0),"down"],
+  ["Our own measures"],
+  ["Average turnaround, unfinished ships included (h)","counts ships still in port up to now, so leaving one unfinished never looks better",S=>num(S.done&&!S.err?S.done.honest_turnaround_h:honestAt(S,S.nowT)),"down"],
+  ["Yard blocks per ship","how spread out each ship's boxes are (final)",S=>num(S.done&&!S.err?S.done.yard_blocks_per_ship_mean:null),"down"],
+  ["Decisions made","",S=>num(S.dec,0),null],
+  ["Actions blocked by our rule check","",S=>num(S.blk,0),null],
+  ["Requests refused by the coordinator","",S=>num(S.ref,0),null],
+  ["Escalations","stalled or impossible ships, data problems",S=>num(S.esc,0),null],
+  ["Language-model calls","",S=>num(S.llmN,0),null]];
+function kv(S,k){if(S.done&&!S.err&&S.done[k]!==undefined)return S.done[k]; return S.kpi?S.kpi[k]:null}
+function num(v,d=1){return v==null||v===""||Number.isNaN(+v)?null:{n:+v,txt:(+v).toFixed(d)}}
+function kpiCells(row){const vals=order.map(k=>row[2](SYS[k]));
+  const ns=vals.filter(v=>v).map(v=>v.n), best=row[3]&&ns.length>1?(row[3]==="up"?Math.max(...ns):Math.min(...ns)):null, spread=ns.length>1&&Math.max(...ns)!==Math.min(...ns);
+  return vals.map(v=>v?`<td class="${spread&&v.n===best?"best":""}">${v.txt}</td>`:`<td class="muted">–</td>`).join("")}
+function drawMini(){
+  if(!META)return; const pick=[1,2,5,6,7,8].map(i=>KPIS[i]);
+  $("#minih").innerHTML=`<tr><th></th>${order.map(k=>`<th title="${esc(SHORT[k])}"><i class="sw" style="background:${SCOL[k]}"></i> ${esc({multi:"VerteX",nocoord:"No co.",single:"Single",fcfs:"FCFS"}[k]||k)}</th>`).join("")}</tr>`;
+  const lab={"Ships sailed":"Sailed","Average turnaround of sailed ships (h)":"Turnaround, sailed (h)","Truck idle hours":"Truck idle h","Placements into blocks over 85 % full":"Into >85 % blocks","Import boxes delivered":"Boxes delivered","Rule breaks":"Rule breaks"};
+  $("#minib").innerHTML=pick.map(r=>`<tr><td>${lab[r[0]]||r[0]}</td>${kpiCells(r)}</tr>`).join("");
+}
 function drawResults(){
   if(page!=="results")return;
   if(!META){$("#resb").innerHTML=`<tr><td colspan="10" class="muted" style="font-family:var(--sans);font-weight:400">No run yet.</td></tr>`;return}
   const t=cmpTime(), allFin=order.every(k=>SYS[k].done), base=SYS.fcfs;
   $("#resnote").textContent=(allFin?"Final numbers from the simulator. ":`Every strategy compared at ${stamp(t)}, the furthest point all of them have reached. `)+describe(META.base,lastKnobs)+".";
   const val=S=>{const fin=allFin&&!S.err; return {h:fin?S.done.honest_turnaround_h:honestAt(S,t),dep:fin?S.done.vessels_departed:depAt(S,t)}};
-  const bv=base?val(base).h:null;
-  $("#resb").innerHTML=order.map(k=>{const S=SYS[k], v=val(S), mph=S.done&&!S.err?S.done.crane_moves_per_hour:(S.craneH>0?S.movesDone/S.craneH:null), viol=S.done&&!S.err?(S.done.violations||[]).length:"–";
-    let vs="–"; if(bv!=null&&v.h!=null&&k!=="fcfs"){const d=bv-v.h; vs=`<span class="${d>=0?"better":"worse"}">${d>=0?"−":"+"}${Math.abs(d).toFixed(1)} h (${Math.abs(d/bv*100).toFixed(0)} %)</span>`} else if(k==="fcfs")vs="baseline";
-    const st=S.err?"error":S.done?"finished":mode==="stopped"?"stopped at "+stamp(S.nowT):"running · "+stamp(S.nowT);
-    return `<tr class="${k==="multi"?"us":""}"><td><i class="sw" style="background:${SCOL[k]}"></i>${esc(S.label)}</td><td style="font-family:var(--sans);color:var(--muted)">${st}</td><td>${v.dep}/${META.ships.length}</td><td>${v.h==null?"–":v.h.toFixed(2)}</td><td>${vs}</td><td>${mph==null?"–":mph.toFixed(1)}</td><td>${S.dec}</td><td>${S.ref}</td><td>${S.blk}</td><td>${viol}</td></tr>`}).join("");
+  const vs=k=>{const b=base?val(base).h:null, v=val(SYS[k]).h; if(k==="fcfs")return "baseline"; if(b==null||v==null)return "–"; const d=b-v; return `<span class="${d>=0?"better":"worse"}">${d>=0?"−":"+"}${Math.abs(d).toFixed(1)} h (${Math.abs(d/b*100).toFixed(0)} %)</span>`};
+  const head=`<tr><th>KPI</th>${order.map(k=>`<th><i class="sw" style="background:${SCOL[k]};margin-right:7px"></i>${esc(SYS[k].label)}</th>`).join("")}</tr>`;
+  const status=`<tr><td>Status</td>${order.map(k=>{const S=SYS[k]; return `<td style="font-family:var(--sans);color:var(--muted)">${S.err?"error":S.done?"finished":mode==="stopped"?"stopped at "+stamp(S.nowT):"running · "+stamp(S.nowT)}</td>`}).join("")}</tr>`;
+  const gap=base?`<tr><td>Turnaround vs first come, first served<small>unfinished ships included, compared at the same moment</small></td>${order.map(k=>`<td>${vs(k)}</td>`).join("")}</tr>`:"";
+  $("#kpit").querySelector("tbody").innerHTML=head+status+KPIS.map(r=>r.length===1?`<tr class="grp"><td colspan="${order.length+1}">${r[0]}</td></tr>`:`<tr><td>${r[0]}${r[1]?`<small>${r[1]}</small>`:""}</td>${kpiCells(r)}</tr>`).join("")+gap;
+  $("#kpinote").textContent=allFin?"Final numbers. Green marks the best value where higher or lower is clearly better.":"Live: each strategy's latest numbers (the strategies stay within half an hour of simulated time of each other). Green marks the best value where higher or lower is clearly better. Final numbers replace them when every run has finished.";
   drawLine(); drawGantts();
 }
 function canvasFor(c){const r=c.parentElement.getBoundingClientRect(), dpr=Math.min(devicePixelRatio||1,2); if(!r.width)return null; c.width=r.width*dpr; c.height=r.height*dpr; const g=c.getContext("2d"); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,r.width,r.height); return [g,r.width,r.height]}
@@ -1032,6 +1083,7 @@ function listen(onMeta,onFail){
       if(m.kind==="ticks")onTick(S,m.rec);
       else if(m.kind==="negotiation")onNeg(S,m.rec);
       else if(m.kind==="llm_calls")onLLM(S,m.rec);
+      else if(m.kind==="kpis")S.kpi=m.rec;
       else if(m.kind==="decisions"){onDec(S,m.rec); const a=m.rec.saw&&m.rec.saw.args; if(m.rec.choice==="place_container"&&a){const i=sidx(a.call_id),bi=BLOCKS.findIndex(b=>b.id===a.block_id); if(i>=0&&bi>=0)S.placeAt[i].push([m.rec.t,bi])}}
       else if(m.kind==="done"){S.done=m.rec; if(m.rec.error)S.err=m.rec.error; else S.nowT=META.end_h}}
     if(order.every(k=>SYS[k].done)){es.close(); setMode("finished")}});
@@ -1178,7 +1230,7 @@ function loop(now){
     else if(gl){gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT)}
     renderStrip(false);
   }
-  if(time-slow>.5){slow=time; drawScore(); renderLog(); if(page==="results")drawResults()}
+  if(time-slow>.5){slow=time; drawScore(); drawMini(); renderLog(); if(page==="results")drawResults()}
   requestAnimationFrame(loop);
 }
 
