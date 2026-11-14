@@ -86,10 +86,13 @@ class _Report:
     def __init__(self) -> None:
         self.found: list[str] = []
 
-    def add(self, problem: str, handling: str) -> None:
+    def add(self, problem: str, handling: str, key: Optional[str] = None) -> None:
+        """Report once per scenario. `key` names the problem when its sentence quotes a value
+        that changes every tick (e.g. remaining moves), so it is still reported only once."""
         msg = f"{PREFIX}{problem} Safest default taken: {handling}"
-        if msg not in _mem.reported:
-            _mem.reported.add(msg)
+        k = key or msg
+        if k not in _mem.reported:
+            _mem.reported.add(k)
             self.found.append(msg)
 
 
@@ -125,7 +128,7 @@ def _ships(state: WorldState, r: _Report) -> tuple:
                 fix = (sum(1 for c in rows if c.direction == "import"), sum(1 for c in rows if c.direction == "export"))
                 src = "its manifest counts are used"
             r.add(f"{_q(cid)} has unreadable remaining moves (discharge {_q(dis, 12)}, load {_q(load, 12)}).",
-                  f"{src}; the simulator still decides when it is done.")
+                  f"{src}; the simulator still decides when it is done.", key=f"moves:{cid}")
             dis = fix[0] if bad_dis else dis
             load = fix[1] if bad_load else load
         else:
