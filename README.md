@@ -1,8 +1,29 @@
 # AgentX — P2 Container Terminal Orchestra
 
 Multi-agent planner for the AgentX@CCI Problem 2 container terminal simulator.
-Read **GROUND_RULES.md** before writing code; task specs are in **TASKS.md**,
-shared types and interfaces in **CONTRACTS.md**.
+The team's working documents (full ground rules, task specs, interface contracts) are shared
+privately and are not in this repository; the rules every change follows are summarised under
+"Ground rules" below.
+
+## Ground rules
+
+In this order; if two conflict, the higher one wins:
+
+1. **Never break a hard rule.** Every action goes through `guard.py` before the simulator sees it:
+   working cranes at least 2 bays apart, all cranes in rail order, IMDG boxes only in block H (and H
+   only for IMDG), reefers only in blocks I or J, no customs-held box released, a ship berthed only
+   after it arrives and on a free berth it fits (length >= ship + 20 m, depth >= draft), no broken or
+   busy equipment assigned.
+2. **Never crash.** Every run reaches the end of the scenario; errors are caught, logged, and the run
+   falls back to rules only.
+3. **Never game the score.** No action whose only purpose is to move a metric; no logic keyed to
+   scenario, ship or container IDs; agent code sees the terminal only through the toolkit's tools and
+   never reads the workbook, the answer key or the FCFS baseline.
+4. Then: ships departed, turnaround (we count unfinished ships too), crane moves per hour, truck idle
+   hours and full-block placements, with a logged reason for every action.
+
+The language model never creates actions: it picks between plans our code made, rewords the
+negotiation log, and turns operator messages into one of five fixed commands that our rules check.
 
 ## Run it
 
@@ -84,6 +105,11 @@ python tools/perturb.py --n 1 --malformed 0 --hidden-key --out runs/mock     # a
 
 `clean_clone_check.sh` tests **committed** work only (it clones). It runs `practice_01 --no-llm`, every hidden
 scenario in the key you give it, and `practice_01` with the LLM endpoint unreachable (proves the fall-back).
+
+**CI needs the workbook.** Without it the scorecard and variant steps fail on purpose (nothing would
+prove 0 violations). One-time setup by a repo admin: `bash tools/encrypt_workbook.sh` (asks for a
+passphrase, writes `ci/workbooks/team.xlsx.gpg`), commit that file, and add the same passphrase as the
+`WORKBOOK_PASSPHRASE` repository secret. The workbook itself is never committed.
 
 ### Freeze checklist (Sun 15 Nov)
 

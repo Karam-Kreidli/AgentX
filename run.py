@@ -102,7 +102,16 @@ def run_one(scenario: str, data: Path, key: Path | None, runs: Path, agent: str 
         summary["llm"] = llm_client.get_client().stats()
     except Exception as e:
         summary["llm"] = {"error": type(e).__name__}
+    _save_summary(run_dir, summary)
     return summary
+
+
+def _save_summary(run_dir: Path, summary: dict) -> None:
+    """Write the summary again with wall_s and llm, so summary.json is the complete record. Never raises."""
+    try:
+        (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    except Exception as e:
+        print(f"[{run_dir.name}] could not update summary.json: {type(e).__name__}: {e}", file=sys.stderr)
 
 
 def _write_failed_summary(run_dir: Path, scenario: str, e: Exception, wall_s: float) -> None:
