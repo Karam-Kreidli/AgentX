@@ -278,5 +278,12 @@
   "outcome": "refused",
   "scenario": "practice_03",
   "at": "start"
+ },
+ {
+  "message": "keep coral bridge at berth after it finishes, it needs an inspection",
+  "command": "not_a_command",
+  "outcome": "refused",
+  "scenario": "practice_03",
+  "at": "start"
  }
-]
+]

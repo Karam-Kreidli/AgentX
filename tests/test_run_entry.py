@@ -167,14 +167,34 @@ def test_hidden_rehearsal_with_mock_key(tmp_path, monkeypatch):
 
 # ------------------------------------------------------------------ clean-clone script and README
 def test_clean_clone_script_is_valid_bash_and_needs_a_workbook():
+    import shutil
     import subprocess
-    script = ROOT / "tools" / "clean_clone_check.sh"
-    assert subprocess.run(["bash", "-n", str(script)]).returncode == 0
-    assert subprocess.run(["bash", str(script)], capture_output=True).returncode == 2
-    assert subprocess.run(["bash", str(script), "/no/such/file.xlsx"], capture_output=True).returncode == 2
+    if shutil.which("bash") is None:
+        pytest.skip("no bash on this machine")
+    # A relative path from the repo root: on Windows, "bash" may be WSL's, which can't read C:\... paths.
+    script = "tools/clean_clone_check.sh"
+    run = lambda *a: subprocess.run(["bash", *a], cwd=ROOT, capture_output=True)
+    assert run("-n", script).returncode == 0
+    assert run(script).returncode == 2
+    assert run(script, "/no/such/file.xlsx").returncode == 2
 
 
 def test_readme_documents_every_entry():
     text = (ROOT / "README.md").read_text(encoding="utf-8")
     for needle in ("--all-hidden", "--no-llm", "run_agent", "clean_clone_check.sh", "runs/P2/", "Freeze checklist"):
         assert needle in text, needle
+
+
+def test_summary_json_keeps_wall_time_and_llm_stats(tmp_path, monkeypatch):
+    import json as _json
+    import run
+    monkeypatch.setattr(run, "TerminalAPI", lambda *a, **k: object())
+
+    def fake_agent(api, run_dir, agent="multi"):
+        s = {"scenario": "practice_01", "violations": []}
+        (run_dir / "summary.json").write_text(_json.dumps(s), encoding="utf-8")
+        return s
+    monkeypatch.setattr(run, "run_agent", fake_agent)
+    out = run.run_one("practice_01", tmp_path / "wb.xlsx", None, tmp_path)
+    saved = _json.loads((tmp_path / "practice_01" / "summary.json").read_text(encoding="utf-8"))
+    assert "wall_s" in saved and "llm" in saved and saved["wall_s"] == out["wall_s"]

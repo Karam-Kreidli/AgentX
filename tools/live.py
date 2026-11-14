@@ -156,6 +156,22 @@ def scenario_meta(api) -> dict:
 
 # --------------------------------------------------------------------------- one strategy, one process
 
+KPI_KEYS = ("vessels_departed", "vessels_total", "avg_turnaround_h", "fcfs_baseline_avg_turnaround_h_same_calls",
+            "crane_moves_per_hour", "truck_idle_hours", "placements_into_blocks_over_85pct", "import_boxes_delivered")
+
+
+def write_kpis(api, path: Path, sim_h: float) -> None:
+    """One line of the simulator's run_summary() (read-only) for the page. Never raises."""
+    try:
+        rs = api.run_summary()
+        rec = {k: rs.get(k) for k in KPI_KEYS}
+        rec.update(t=round(sim_h, 3), violations=len(rs.get("violations") or []))
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, default=str) + "\n")
+    except Exception:
+        pass
+
+
 def worker(key: str, agent: str, base: str, data: str, keyfile: Optional[str], knobs: dict, run_dir: str,
            cmd_path: str, llm_on: bool, inbox: str, rate: float, progress=None, slot: int = 0) -> None:
     os.chdir(ROOT)
@@ -176,7 +192,8 @@ def worker(key: str, agent: str, base: str, data: str, keyfile: Optional[str], k
 
         # Pace by simulated time so every strategy stays side by side, and pick up the judges' commands.
         start = api.now
-        pace = {"rate": rate, "wall0": time.monotonic(), "sim0": 0.0, "off": 0}
+        pace = {"rate": rate, "wall0": time.monotonic(), "sim0": 0.0, "off": 0, "kpi_next": 0.0}
+        kpi_path = run_dir_p / "kpis.jsonl"
         orig_step = api._step
 
         def step(until):
@@ -198,6 +215,9 @@ def worker(key: str, agent: str, base: str, data: str, keyfile: Optional[str], k
             except OSError:
                 pass
             sim_h = (until - start).total_seconds() / 3600
+            if sim_h >= pace["kpi_next"]:               # the simulator's own KPI summary, every half hour
+                pace["kpi_next"] = sim_h + 0.5
+                write_kpis(api, kpi_path, sim_h)
             if progress is not None:                    # lockstep: never more than half an hour ahead of the slowest
                 progress[slot] = sim_h
                 t_wait = time.monotonic()
@@ -530,7 +550,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if s is None:
             return
-        files = {(k, n): 0 for k in s.systems for n in ("ticks.jsonl", "negotiation.jsonl", "decisions.jsonl", "llm_calls.jsonl")}
+        files = {(k, n): 0 for k in s.systems for n in ("ticks.jsonl", "negotiation.jsonl", "decisions.jsonl", "llm_calls.jsonl", "kpis.jsonl")}
         done: set = set()
         try:
             while s.meta is None and s.meta_error is None and STATE["session"] is s:

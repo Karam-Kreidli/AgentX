@@ -154,6 +154,9 @@ def validate(cmd: Command, state: WorldState) -> tuple[bool, str]:
     if cmd is None:
         return False, "the message could not be understood, so nothing was changed"
     k = cmd.kind
+    if k == CMD_NONE and "keep_at_berth" in (cmd.reason or ""):
+        return False, ("a ship can't be kept at its berth or have its departure delayed: the terminal "
+                       "sails it automatically one hour after its last move, and no command can change that")
     if k == CMD_NONE:
         return False, ("that is not one of the commands I can carry out (prioritise a ship, reserve a "
                        "berth, hold a ship, approve or decline an escalation); the safety rules can't be "

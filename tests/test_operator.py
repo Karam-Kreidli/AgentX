@@ -258,6 +258,8 @@ def _good_reader(d):
                                    "customs", "qc2", "block", "cranes", "speed up", "status", "thanks"))
     if harmful:
         return cmd("not_a_command")
+    if any(w in m for w in ("inspection", "after it finishes", "delay its departure")):
+        return {**cmd("not_a_command"), "reason": "keep_at_berth: ships sail by themselves"}
     if "approve" in m:
         return cmd("approve_escalation")
     if "decline" in m:
@@ -354,3 +356,11 @@ def test_the_end_of_run_reason_names_the_operator_hold():
     O.apply(O.Command("hold_ship", "WAIT"), st)
     why = explain._why(st, st.ships[0], set(), {c: 0.0 for c in explain.CAUSES})
     assert "operator put it on hold" in why and "busy" not in why
+
+
+def test_keeping_a_ship_at_berth_is_refused_with_the_real_reason():
+    st = world(ship("DONE", "working", "B1"))
+    ok, why = O.validate(O.Command("not_a_command", "DONE", None, "keep_at_berth"), st)
+    assert not ok and "one hour after its last move" in why
+    ok, why = O.validate(O.Command("not_a_command", None, None, "chat"), st)
+    assert not ok and "not one of the commands" in why
