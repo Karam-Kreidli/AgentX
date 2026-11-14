@@ -450,8 +450,67 @@ table.big{border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow);border
 #tl-t{font:800 13px var(--sans);font-variant-numeric:tabular-nums;color:var(--text);min-width:112px;text-align:right;white-space:nowrap}
 #stage.replay #clock{box-shadow:0 0 0 2px var(--amber),0 2px 10px rgba(34,48,58,.12)}
 #stage.replay #clocklb{color:var(--amber);font-weight:800}
-#logb td.t{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
-#logb td.t:hover{color:var(--teal)}
+/* messages page: a WhatsApp-style group chat (the Live page strip keeps its table) */
+#logwrap{position:relative}
+#logscroll{position:relative;--wall:#efeae2;--in:#fff;--out:#d9fdd3;--ink:#111b21;--meta:#667781;--q:rgba(11,20,26,.05);--day:#fff;--alertin:#fdeeeb;--bsh:0 1px .5px rgba(11,20,26,.13);
+  background:var(--wall) radial-gradient(rgba(11,20,26,.045) 1px,transparent 1.5px) 0 0/22px 22px}
+#logempty{color:var(--meta)}
+#logb{display:flex;flex-direction:column;padding:10px 5% 18px}
+#logb .day{align-self:center;margin:12px 0 4px;background:var(--day);color:var(--meta);font-size:12px;font-weight:700;padding:5px 12px;border-radius:8px;box-shadow:var(--bsh)}
+#logb .row{display:flex;align-items:flex-start;gap:8px;margin-top:2px}
+#logb .row.first{margin-top:10px}
+#logb .row.out{flex-direction:row-reverse}
+#logb .av,#logb .avsp{width:34px;height:34px;flex:none}
+.av{flex:none}
+.av{border-radius:50%;display:grid;place-items:center;color:#fff;font-size:13px;font-weight:800}
+#logb .av svg{width:19px;height:19px}
+#logb .bub{position:relative;max-width:min(78%,660px);min-width:130px;background:var(--in);color:var(--ink);border-radius:8px;padding:6px 9px 7px;box-shadow:var(--bsh);font-size:14px;line-height:1.38;cursor:pointer;overflow-wrap:anywhere}
+#logb .bub.wide{max-width:min(94%,960px)}
+#logb .out .bub{background:var(--out)}
+#logb .bub.alert{background:var(--alertin)}
+#logb .first .bub{border-top-left-radius:0}
+#logb .first.out .bub{border-top-left-radius:8px;border-top-right-radius:0}
+#logb .first .bub::before{content:"";position:absolute;top:0;left:-8px;width:8px;height:13px;background:inherit;clip-path:polygon(0 0,100% 0,100% 100%)}
+#logb .first.out .bub::before{left:auto;right:-8px;clip-path:polygon(0 0,100% 0,0 100%)}
+#logb .bh{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 8px;margin-bottom:2px;font-size:13px;font-weight:800}
+#logb .bh .sy{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--meta)}
+#logb .bh .sy .sw{width:8px;height:8px}
+#logb .qt{display:block;border-left:4px solid;border-radius:6px;background:var(--q);padding:5px 8px;margin:2px 0 5px;font-size:12.5px;cursor:pointer}
+#logb .qt:hover{filter:brightness(.97)}
+#logb .qt.gone{cursor:default}
+#logb .qt .qn{display:block;font-weight:800}
+#logb .qt .qx{color:var(--meta);display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+#logb .tx b{font-weight:700}
+#logb .tx::after{content:"";display:block;clear:both}
+#logb .at{font-weight:800;margin-right:4px}
+#logb .ft{float:right;display:inline-flex;align-items:center;gap:6px;margin:7px 0 -3px 14px;font-size:11px;line-height:1;color:var(--meta);white-space:nowrap}
+#logb .tm{font-family:var(--mono);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}
+#logb .tm:hover{color:var(--teal)}
+#logb .st{display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:11.5px}
+#logb .st svg{width:15px;height:15px}
+#logb .s-ok{color:#1d9b55}#logb .s-no{color:var(--red)}#logb .s-warn{color:var(--amber)}#logb .s-wait{color:var(--meta)}
+#logb .why{cursor:auto;margin-top:6px;padding-top:6px;border-top:1px solid rgba(11,20,26,.09);font-size:12.5px;color:var(--meta)}
+#logb .why pre{margin:4px 0 8px;white-space:pre-wrap;word-break:break-word;font-family:var(--mono);font-size:11.5px;color:var(--ink);background:var(--q);border-radius:6px;padding:8px 10px;max-height:340px;overflow:auto}
+#logb .why .lbl{font-size:11.5px;margin-top:6px}
+/* arrival: each new bubble rises from the bottom edge and settles, like WhatsApp; the list glides up with it */
+#logb .row.enter{animation:msgin .32s cubic-bezier(.2,.9,.3,1.15) both;transform-origin:0 100%}
+#logb .row.out.enter{transform-origin:100% 100%}
+#logb .day.enter{animation:dayin .3s ease-out both}
+#logb .st.pop{animation:stpop .45s ease-out}
+#logb .row.flash .bub{animation:bubflash 1.6s ease-out both}
+@keyframes msgin{from{opacity:0;transform:translateY(18px) scale(.94)}60%{opacity:1}}
+@keyframes dayin{from{opacity:0;transform:scale(.9)}}
+@keyframes stpop{0%{opacity:.2;transform:scale(.7)}60%{transform:scale(1.12)}}
+@media (prefers-reduced-motion:reduce){#logb .row.enter,#logb .day.enter,#logb .st.pop{animation:none}}
+/* sender avatars: the same picture in the chat and in the "From" filter list */
+.ag button .av{width:24px;height:24px;font-size:11px;transition:opacity .2s,filter .2s}
+.ag button .av svg{width:14px;height:14px}
+.ag button[aria-pressed="false"] .av{opacity:.45;filter:grayscale(.7)}
+@keyframes bubflash{0%,45%{box-shadow:0 0 0 3px var(--amber)}100%{box-shadow:var(--bsh)}}
+#logjump{position:absolute;right:22px;bottom:18px;z-index:3;width:42px;height:42px;border-radius:50%;background:var(--panel);color:var(--muted);box-shadow:0 2px 8px rgba(0,0,0,.25);display:grid;place-items:center}
+#logjump svg{width:22px;height:22px}
+#logjump b{position:absolute;top:-6px;right:-6px;background:#25d366;color:#fff;font-size:11px;font-weight:800;border-radius:999px;padding:2px 6px}
+@media (max-width:700px){#logb{padding:8px 8px 14px} #logb .bub{max-width:84%} #logb .av,#logb .avsp{width:28px;height:28px} #logb .av svg{width:16px;height:16px}}
 @media (max-width:700px){#tl-t{min-width:0;font-size:12px}#tl-back,#tl-fwd{display:none!important}#legend{display:none}}
 #tl-fill{background:linear-gradient(90deg,var(--teal) 0,var(--teal) var(--p,100%),var(--line) var(--p,100%))}
 #stage.replay #tl-fill{background:linear-gradient(90deg,var(--amber) 0,var(--amber) var(--p,100%),var(--line) var(--p,100%))}
@@ -510,6 +569,11 @@ select,input[type=number],input[type=text],input[type=search]{font:15px var(--sa
 [data-theme="dark"] .msgs td{border-top-color:#151e2d}
 [data-theme="dark"] .msgs tr.m:hover td{background:#111b2b}
 [data-theme="dark"] .msgs tr.judge td{background:#1a140c}
+[data-theme="dark"] #logscroll{--wall:#0b141a;--in:#202c33;--out:#005c4b;--ink:#e9edef;--meta:#8696a0;--q:rgba(255,255,255,.06);--day:#182229;--alertin:#3a2226;--bsh:0 1px .5px rgba(0,0,0,.4);
+  background:var(--wall) radial-gradient(rgba(255,255,255,.03) 1px,transparent 1.5px) 0 0/22px 22px}
+[data-theme="dark"] #logb .nm,[data-theme="dark"] #logb .at,[data-theme="dark"] #logb .qn{filter:brightness(1.7) saturate(.85)}
+[data-theme="dark"] #logb .s-ok{color:#4fc58e}
+[data-theme="dark"] #logb .why{border-top-color:rgba(255,255,255,.08)}
 [data-theme="dark"] .big tr.us td{background:#0f1d30}
 [data-theme="dark"] #status.running .sq{box-shadow:0 0 0 4px rgba(79,197,142,.18)}
 #themebtn{margin:auto 6px auto 0;height:38px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:var(--panel-2);color:var(--muted);display:inline-flex;align-items:center;gap:7px;font-weight:600;font-size:13px}
@@ -633,12 +697,13 @@ select,input[type=number],input[type=text],input[type=search]{font:15px var(--sa
   <aside id="filters">
     <div class="grp"><label class="lb" for="f-sys">Strategy</label><select id="f-sys"></select></div>
     <div class="grp"><span class="lb">From</span><div class="ag" id="f-ag"></div></div>
-    <div class="grp"><label class="tg"><input type="checkbox" id="f-prob"> Only refusals, blocks and alerts</label><label class="tg"><input type="checkbox" id="f-follow" checked> Follow live (newest on top)</label></div>
+    <div class="grp"><label class="tg"><input type="checkbox" id="f-prob"> Only refusals, blocks and alerts</label><label class="tg"><input type="checkbox" id="f-follow" checked> Follow live (newest at the bottom)</label></div>
     <div class="grp"><span class="lb">This strategy so far</span><div class="stats"><div><b id="s-rounds">0</b>decision rounds</div><div><b id="s-msgs">0</b>messages</div><div><b id="s-ref">0</b>refused by the coordinator</div><div><b id="s-blk">0</b>blocked by the rule check</div></div></div>
   </aside>
   <div id="logwrap">
     <div id="logbar"><h2>Messages</h2><input type="search" id="f-q" placeholder="Search ship, block, crane…" style="max-width:280px"><span class="muted" style="font-size:12.5px" id="logcount"></span></div>
-    <div id="logscroll"><table class="msgs"><tbody id="logb"></tbody></table><div id="logempty">Nothing yet. Messages appear here as soon as a run starts.</div></div>
+    <div id="logscroll"><div id="logb" class="chat"></div><div id="logempty">Nothing yet. Messages appear here as soon as a run starts.</div></div>
+    <button type="button" id="logjump" hidden aria-label="Jump to the newest message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><b hidden></b></button>
   </div>
 </section>
 
@@ -1132,7 +1197,7 @@ function show(p){
   if(!PAGES.includes(p))p="scenario"; page=p;
   document.querySelectorAll(".page").forEach(s=>s.hidden=s.id!=="p-"+p);
   document.querySelectorAll("#nav a").forEach(a=>a.setAttribute("aria-current",a.dataset.p===p?"page":"false"));
-  if(p==="messages"){logDirty=true;renderLog()}
+  if(p==="messages"){logDirty=true;logSnap=true;renderLog()}
   if(p==="results")drawResults();
   if(p==="live"){resize();renderStrip(true)}
 }
@@ -1189,7 +1254,7 @@ const ACOL={berth:"#2f6f9e",crane:"#c46f1c",yard:"#2e8b62",trucks:"#7a5fb5",coor
 const RES={berth:"a berth",cranes:"cranes",trucks:"trucks",yard_slots:"yard slots"};
 const names=s=>{s=String(s??""); if(!META)return s; for(const x of META.ships)if(s.includes(x.id))s=s.split(x.id).join(shortName(x)); return s};
 const shipName=id=>{const i=sidx(id);return i>=0?shortName(META.ships[i]):(id||"")};
-let seq=0, logDirty=true, stripDirty=true;
+let seq=0, logDirty=true, stripDirty=true, logSnap=true;
 function addMsg(S,m){m.why=names(m.why); if(m.kind==="alert")m.text=names(m.text); m.id=++seq; m.sys=S.key; m.wall=performance.now(); S.msgs.push(m); if(m.tick!=null&&m.tick>=0)S.rounds.add(m.tick);
   if(S.msgs.length>6000)S.msgs.splice(0,1000); S.lastWall=m.wall; logDirty=true; if(S.key===watching)stripDirty=true; return m}
 function pushFx(S,f){S.fx.push(f); if(S.fx.length>90)S.fx.splice(0,45)}
@@ -1203,7 +1268,7 @@ function onNeg(S,r){
   const out=st==="granted"?["granted","ok"]:st==="trimmed"?["trimmed","warn"]:["refused","no"]; if(st==="refused")S.ref++;
   if(req){req.out=out; delete S.pending[key]}
   const what=r.resource==="berth"?(st==="refused"?"a berth":"the berth"):(st==="refused"?res:`${r.granted}${req&&req.amount?" of "+req.amount:""} ${res}`);
-  addMsg(S,{tick:r.tick,t:r.t,fk:"coordinator",to:AG[r.agent]||r.agent,text:`${st==="refused"?"refuses":"grants"} ${what} for <b>${ship}</b>`,out,why:r.grant_reason||"",kind:"grant"});
+  addMsg(S,{tick:r.tick,t:r.t,fk:"coordinator",to:AG[r.agent]||r.agent,text:`${st==="refused"?"refuses":"grants"} ${what} for <b>${ship}</b>`,out,why:r.grant_reason||"",kind:"grant",replyTo:req?req.id:null});
 }
 function shipOf(r){const a=(r.saw&&r.saw.args)||{}; if(a.call_id)return a.call_id; const s=META.ships.find(x=>String(r.reason||"").includes(x.id)); return s?s.id:""}
 function actText(r){const a=(r.saw&&r.saw.args)||{}, cid=shipOf(r), ship=cid?esc(shipName(cid)):"";
@@ -1225,8 +1290,8 @@ function onDec(S,r){
     addMsg(S,{tick:r.tick,t:r.t,fk:r.agent,to:"Terminal",text:actText(r),out,why:(r.reason||"")+(r.guard_ok===false?" · Rule check: "+(r.guard_reason||""):tr&&tr.error?" · Simulator: "+tr.error:""),kind:"act"}); return}
   if(ch.startsWith("option:")){S.dec++; addMsg(S,{tick:r.tick,t:r.t,fk:"supervisor",to:"Agents",text:`chooses a plan: ${esc(r.reason)}`,out:[r.backend||"rules",""],why:"Options it had: "+((r.options||[]).join(", ")||"–"),kind:"plan"}); return}
   const alerts={ship_stalled:"Stall watch",escalate:"Escalation",llm_down:"Model",llm_up:"Model",CRITICAL:"Safety monitor",exception:"Loop",anomaly:"Data check"};
-  if(ch.startsWith("command:")){addMsg(S,{tick:r.tick,t:r.t,fk:"operator",from:"Operator channel",to:"Agents",text:`${esc(ch.slice(8).replace(/_/g," "))}: ${esc(r.reason)}`,out:["accepted","ok"],why:"The model turned the message into this fixed command; our rules checked it before the agents use it.",kind:"alert"});return}
-  if(ch==="escalate"&&/^Operator message/.test(String(r.reason))){addMsg(S,{tick:r.tick,t:r.t,fk:"operator",from:"Operator channel",to:"Operator",text:esc(r.reason),out:["not done","no"],why:"Nothing was changed. The message could only have become one of five fixed commands, and every action still goes through the rule check.",kind:"alert"});return}
+  if(ch.startsWith("command:")){addMsg(S,{tick:r.tick,t:r.t,fk:"operator",from:"Operator channel",to:"Agents",text:`${esc(ch.slice(8).replace(/_/g," "))}: ${esc(r.reason)}`,out:["accepted","ok"],why:"The model turned the message into this fixed command; our rules checked it before the agents use it.",kind:"alert",replyTo:S.lastOp});return}
+  if(ch==="escalate"&&/^Operator message/.test(String(r.reason))){addMsg(S,{tick:r.tick,t:r.t,fk:"operator",from:"Operator channel",to:"Operator",text:esc(r.reason),out:["not done","no"],why:"Nothing was changed. The message could only have become one of five fixed commands, and every action still goes through the rule check.",kind:"alert",replyTo:S.lastOp});return}
   if(alerts[ch]&&ch!=="llm_up"&&ch!=="llm_down")S.esc++;
   if(alerts[ch]){const txt={llm_down:"went offline; agents carry on with rules",llm_up:"is back online"}[ch];
     addMsg(S,{tick:r.tick,t:r.t,fk:"alert",from:alerts[ch],to:"Operator",text:txt||esc(r.reason),out:[ch==="llm_up"?"info":"alert",ch==="llm_up"?"ok":"no"],why:txt?esc(r.reason||""):"",kind:"alert"});return}
@@ -1246,7 +1311,7 @@ function onLLM(S,r){
   let last=null; for(let i=S.msgs.length-1;i>=0;i--)if(S.msgs[i].tick>=0){last=S.msgs[i];break}   // file it under the round it belongs to
   const t=last?last.t:S.nowT, BK={local:"VM model",groq:"Groq"};
   addMsg(S,{tick:last?last.tick:-2,t,fk:"llm",to:LTASK[r.task]||r.task,text:gist,out:[r.status==="ok"?`${BK[r.backend]||r.backend||""} · ${(+r.latency_s).toFixed(1)} s`:r.status.replace(/_/g," "),r.status==="ok"?"ok":"no"],
-    why:"",raw:{sent:r.sent,reply:r.reply,meta:`${r.backend||"–"} · model ${r.model||"–"} · attempt ${r.attempt} · ${r.prompt_tokens??"?"} tokens in, ${r.completion_tokens??"?"} out · ${(+r.latency_s).toFixed(2)} s`},kind:"model"});
+    why:"",raw:{sent:r.sent,reply:r.reply,meta:`${r.backend||"–"} · model ${r.model||"–"} · attempt ${r.attempt} · ${r.prompt_tokens??"?"} tokens in, ${r.completion_tokens??"?"} out · ${(+r.latency_s).toFixed(2)} s`},kind:"model",replyTo:r.task==="operator"?S.lastOp:null});
 }
 function fromHTML(m){const k=m.fk, nm=m.from||AG[k]||k, col=ACOL[k]||(k==="alert"?"#c8503f":"#67737b");
   return `<span style="color:${col}">${esc(nm)}</span><span class="ar">→</span><span class="to">${esc(m.to)}</span>`}
@@ -1266,16 +1331,91 @@ function renderStrip(force){
   b.innerHTML=rows.map(m=>rowHTML(m,m.id>stripSeen,false,false)).join(""); stripSeen=Math.max(stripSeen,rows.length?rows[rows.length-1].id:0);
 }
 
-/* Messages page */
-const open=new Set(); let agFilter=new Set(), lastLogLen=-1, logSeen=0;
+/* Messages page: a WhatsApp-style group chat. Every field the old list showed is still here: sender, recipient
+   (as an @mention), text, time (click: show that moment in 3D), status, strategy, and the reason / model call on tap. */
+const AVI={anchor:'<circle cx="12" cy="5" r="2"/><path d="M12 7v14M5 13a7 7 0 0 0 14 0M8 10h8"/>',
+  crane:'<path d="M5 21h8M9 21V4M9 4h11M9 8l4-4M18 4v6"/><rect x="16" y="10" width="4" height="3"/>',
+  boxes:'<rect x="3" y="13" width="8" height="7"/><rect x="13" y="13" width="8" height="7"/><rect x="8" y="5" width="8" height="7"/>',
+  truck:'<path d="M2 6h11v10H2zM13 10h4l3 3v3h-7"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
+  hub:'<circle cx="12" cy="12" r="3"/><circle cx="4" cy="5" r="1.6"/><circle cx="20" cy="5" r="1.6"/><circle cx="4" cy="19" r="1.6"/><circle cx="20" cy="19" r="1.6"/><path d="M5.3 6.2 9.7 10M18.7 6.2 14.3 10M5.3 17.8l4.4-3.8M18.7 17.8l-4.4-3.8"/>',
+  spark:'<path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>',
+  shield:'<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>',
+  warn:'<path d="M12 3 2 20h20zM12 10v4M12 17v.5"/>',
+  person:'<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+  chat:'<path d="M4 5h16v11H9l-5 4z"/>',
+  list:'<path d="M8 6h12M8 12h12M8 18h12M4 6h.5M4 12h.5M4 18h.5"/>',
+  loop:'<path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v4h-4"/>'};
+const AVK={berth:"anchor",crane:"crane",yard:"boxes",trucks:"truck",coordinator:"hub",supervisor:"spark",llm:"spark",skeleton:"list",single:"list",
+  operator:"chat",judges:"person",loop:"loop",guard:"shield",invariants:"shield",validate:"warn",state:"warn",escalate:"warn",stall:"warn"};
+const STI={ok:'<svg viewBox="0 0 20 14" aria-hidden="true"><path d="M1 7l4 4 8-8M8 10l1 1 8-8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  no:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  wait:'<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 5v3l2 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  warn:'<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5v4.2M8 11v.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'};
+const sender=m=>m.from||AG[m.fk]||m.fk;
+const nameCol=m=>ACOL[m.fk]||(m.fk==="alert"?"#c8503f":"#67737b");
+const toCol=n=>ACOL[Object.keys(AG).find(k=>AG[k]===n)]||"var(--teal)";
+function avHTML(m){
+  const k=m.fk==="alert"?({"Safety monitor":"shield",Model:"spark",Loop:"loop"}[m.from]||"warn"):AVK[m.fk], nm=sender(m);
+  const bg=m.fk==="coordinator"?"#41525e":nameCol(m);
+  return `<span class="av" style="background:${bg}" title="${esc(nm)}">${k?`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${AVI[k]}</svg>`:esc(String(nm).slice(0,1).toUpperCase())}</span>`}
+function stHTML(m){const st=m.out[1]; return m.out[0]||STI[st]?`<span class="st s-${st||"none"}">${STI[st]||""}${esc(m.out[0])}</span>`:""}
+function bubbleHTML(m,o){
+  const me=m.kind==="judge", nm=sender(m), col=nameCol(m);
+  const cls=["row",me?"out":"in",o.cont?"":"first",o.enter?"enter":"",o.flash?"flash":""].join(" ");
+  let h=`<div class="${cls}" data-id="${m.id}">${me?"":o.cont?'<span class="avsp"></span>':avHTML(m)}`;
+  h+=`<div class="bub${m.kind==="alert"?" alert":""}${o.open&&m.raw?" wide":""}"${o.flash?` style="animation-delay:-${o.flash}ms"`:""}>`;
+  if(!o.cont)h+=`<div class="bh"><span class="nm" style="color:${col}">${me?"You · ":""}${esc(nm)}</span>${o.withSys?`<span class="sy"><i class="sw" style="background:${SCOL[m.sys]}"></i>${esc(SHORT[m.sys]||m.sys)}</span>`:""}</div>`;
+  const q=o.q; if(q){const qc=q.kind==="judge"?"#1d9b55":nameCol(q);
+    h+=`<div class="qt${o.qShown?"":" gone"}" data-q="${q.id}" style="border-color:${qc}" title="${o.qShown?"Show the original message":"The original message is hidden by the current filters"}"><span class="qn" style="color:${qc}">${q.kind==="judge"?"You · ":""}${esc(sender(q))}</span><span class="qx">${q.text}</span></div>`}
+  h+=`<div class="tx"><span class="at" style="color:${toCol(m.to)}">@${esc(m.to)}</span>${m.text}<span class="ft"><span class="tm" title="Show this moment in 3D">${hm(m.t)}</span>${stHTML(m)}</span></div>`;
+  if(o.open&&m.raw)h+=`<div class="why"><div class="lbl">${esc(m.raw.meta)}</div><div class="lbl">What the model was shown (the data; the instructions are in llm/prompts/${esc(m.to==="Operator channel"?"operator":m.to==="Negotiation log"?"voice":"supervisor")}.md)</div><pre>${esc(pretty(m.raw.sent))}</pre><div class="lbl">What it answered, word for word</div><pre>${esc(pretty(m.raw.reply))}</pre></div>`;
+  else if(o.open&&m.why)h+=`<div class="why">${esc(m.why)}</div>`;
+  return h+`</div></div>`}
+
+/* What is on screen, so new messages can be added one by one instead of redrawing the whole chat:
+   L.sig = the filters it was drawn with, L.ids/L.msgs = the messages shown, L.tail = the last one (for grouping and round pills). */
+const open=new Set(); let agFilter=new Set(), lastLogLen=-1, logSeen=0, flashId=0, flashAt=0;
+const L={sig:"",ids:new Set(),msgs:[],out:new Map(),byId:new Map(),tail:null,lastId:0,queue:[],timer:0,pin:true,unseen:0,all:false,follow:true};
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+function logAtBottom(){const sc=$("#logscroll"); return sc.scrollHeight-sc.scrollTop-sc.clientHeight<60}
+// html for a run of messages, carrying the grouping state (same sender in a row, round pills) in L.tail
+function chatHTML(ms,enter){
+  const fl=performance.now()-flashAt<1600?Math.max(1,Math.round(performance.now()-flashAt)):0; let h="", t=L.tail;
+  for(const m of ms){
+    if(!L.all&&(!t||m.tick!==t.tick)){ if(m.tick!=null&&m.tick>=0)h+=`<div class="day${enter?" enter":""}">Round ${m.tick} · ${stamp(m.t)}</div>`; t={tick:m.tick,me:null} }
+    const me=m.kind==="judge", nm=sender(m), qm=m.replyTo!=null?L.byId.get(m.replyTo):null;
+    h+=bubbleHTML(m,{enter,withSys:L.all,open:open.has(m.id),cont:!!t&&t.me===me&&t.nm===nm&&t.sys===m.sys,q:qm,qShown:!!qm&&L.ids.has(qm.id),flash:m.id===flashId?fl:0});
+    t={tick:m.tick,me,nm,sys:m.sys}; L.ids.add(m.id); L.msgs.push(m); L.out.set(m.id,m.out.join("|")); L.lastId=m.id}
+  L.tail=t; return h}
+// glide the chat to the bottom (eased, follows content that keeps growing); a wheel/touch/key from the reader stops it
+let autoOn=false, autoRaf=0;
+function glide(){ const sc=$("#logscroll"); if(REDUCED){sc.scrollTop=sc.scrollHeight;return} autoOn=true; if(autoRaf)return;
+  const step=()=>{ const d=sc.scrollHeight-sc.clientHeight-sc.scrollTop;
+    if(!autoOn||d<=.5){autoRaf=0; autoOn=false; return}
+    sc.scrollTop+=Math.max(1,d*.16); autoRaf=requestAnimationFrame(step) };
+  autoRaf=requestAnimationFrame(step) }
+function stopGlide(){autoOn=false; if(autoRaf){cancelAnimationFrame(autoRaf); autoRaf=0}}
+function jumpBtn(){const jb=$("#logjump"); jb.hidden=L.pin||!L.msgs.length; jb.querySelector("b").hidden=!L.unseen; jb.querySelector("b").textContent=L.unseen}
+// one queued message onto the chat; a big batch is spread out, and anything far behind is added at once
+function drain(){
+  L.timer=0; const b=$("#logb"); if(!L.queue.length||page!=="messages")return;
+  if(L.queue.length>24){const quick=L.queue.splice(0,L.queue.length-12); b.insertAdjacentHTML("beforeend",chatHTML(quick,false)); if(!L.pin)L.unseen+=quick.length}
+  const ms=L.queue.splice(0,1); b.insertAdjacentHTML("beforeend",chatHTML(ms,!REDUCED));
+  if(L.follow&&L.pin){ // keep the window at 400 messages, like before
+    let rows=b.querySelectorAll(".row").length; while(rows>400&&b.firstElementChild){const f=b.firstElementChild; if(f.classList.contains("row")){rows--; L.ids.delete(+f.dataset.id)} f.remove()}
+    if(L.msgs.length>2000)L.msgs.splice(0,L.msgs.length-1000);
+    glide() } else if(!L.pin)L.unseen+=ms.length;
+  jumpBtn();
+  if(L.queue.length)L.timer=setTimeout(drain,Math.max(55,Math.min(170,650/L.queue.length)))}
+
 function renderLog(){
   if(page!=="messages"||!logDirty)return; logDirty=false;
   const key=$("#f-sys").value, all=key==="all", list=all?order.flatMap(k=>SYS[k].msgs):(SYS[key]?SYS[key].msgs:[]);
   const q=$("#f-q").value.trim().toLowerCase(), prob=$("#f-prob").checked, follow=$("#f-follow").checked;
-  // counts per sender for the filter buttons
-  const cnt={}; list.forEach(m=>{const k=m.from||AG[m.fk]||m.fk; cnt[k]=(cnt[k]||0)+1});
+  // counts per sender for the filter buttons, each with the same avatar it has in the chat
+  const cnt={}, rep={}; list.forEach(m=>{const k=m.from||AG[m.fk]||m.fk; cnt[k]=(cnt[k]||0)+1; if(!rep[k])rep[k]=m});
   const agb=$("#f-ag"); const names=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]);
-  if(agb.dataset.sig!==names.join("|")){agb.dataset.sig=names.join("|"); agb.innerHTML=names.map(n=>`<button type="button" data-n="${esc(n)}" aria-pressed="${!agFilter.size||agFilter.has(n)}"><i class="sw" style="background:${ACOL[Object.keys(AG).find(k=>AG[k]===n)]||"#c8d4d3"}"></i>${esc(n)}<span class="n"></span></button>`).join("")}
+  if(agb.dataset.sig!==names.join("|")){agb.dataset.sig=names.join("|"); agb.innerHTML=names.map(n=>`<button type="button" data-n="${esc(n)}" aria-pressed="${!agFilter.size||agFilter.has(n)}">${avHTML(rep[n])}${esc(n)}<span class="n"></span></button>`).join("")}
   agb.querySelectorAll("button").forEach(b=>{b.querySelector(".n").textContent=cnt[b.dataset.n]||0; b.setAttribute("aria-pressed",!agFilter.size||agFilter.has(b.dataset.n))});
   let rows=list.filter(m=>m.kind!=="sys");
   if(agFilter.size)rows=rows.filter(m=>agFilter.has(m.from||AG[m.fk]||m.fk));
@@ -1284,21 +1424,39 @@ function renderLog(){
   if(all)rows.sort((a,b)=>a.t-b.t||a.id-b.id);
   $("#logcount").textContent=rows.length+" of "+list.length+" messages";
   $("#logempty").hidden=rows.length>0; if(!rows.length&&list.length)$("#logempty").textContent="No messages match these filters.";
-  const recent=rows.slice(follow?-400:-1500), groups=[];
-  for(const m of recent){const g=groups[groups.length-1]; if(g&&g.tick===m.tick&&!all)g.rows.push(m); else groups.push({tick:all?null:m.tick,t:m.t,rows:[m]})}
-  groups.reverse(); let html="";
-  for(const g of groups){ if(g.tick!=null&&g.tick>=0)html+=`<tr class="round"><td colspan="4">Round ${g.tick} · ${stamp(g.t)}</td></tr>`;
-    for(const m of g.rows)html+=rowHTML(m,follow&&m.id>logSeen&&logSeen>0,all,open.has(m.id))}
-  const sc=$("#logscroll"), keep=sc.scrollTop; $("#logb").innerHTML=html; if(!follow)sc.scrollTop=keep;
-  logSeen=Math.max(logSeen,...list.map(m=>m.id),0);
   const S=SYS[all?"multi":key]||SYS[order[0]]; if(S){$("#s-rounds").textContent=S.rounds.size;$("#s-msgs").textContent=S.msgs.length;$("#s-ref").textContent=S.ref;$("#s-blk").textContent=S.blk}
+  logSeen=Math.max(logSeen,...list.map(m=>m.id),0);
+  const sc=$("#logscroll"), b=$("#logb"), sig=[key,q,prob,follow,[...agFilter].join(","),[...open].join(",")].join("|");
+  // only new messages at the end, with the same filters: add them one by one (WhatsApp style) and update statuses in place
+  const last=L.lastId?rows.findIndex(m=>m.id===L.lastId):-1, queued=new Set(L.queue.map(m=>m.id));
+  if(!logSnap&&sig===L.sig&&(L.lastId?last>=0&&rows.slice(0,last+1).every(m=>m.id<=L.lastId):!L.msgs.length)){
+    for(const m of rows.slice(last+1))if(!queued.has(m.id)){L.queue.push(m); L.byId.set(m.id,m)}
+    for(let i=Math.max(0,L.msgs.length-300);i<L.msgs.length;i++){const m=L.msgs[i], o=m.out.join("|"); if(L.out.get(m.id)!==o){L.out.set(m.id,o);
+      const el=b.querySelector(`.row[data-id="${m.id}"] .st`), html=stHTML(m); if(el){el.outerHTML=html; const n=b.querySelector(`.row[data-id="${m.id}"] .st`); if(n)n.classList.add("pop")}}}
+    if(L.queue.length&&!L.timer)drain(); return}
+  // anything else (first draw, filters, a bubble opened): redraw, keeping the reader's place
+  clearTimeout(L.timer); L.timer=0; L.queue=[]; stopGlide();
+  const recent=rows.slice(follow?-400:-1500), stick=follow&&(logSnap||L.pin); let anchor=null;
+  if(!stick)for(const el of b.children)if(el.dataset.id&&el.offsetTop+el.offsetHeight>sc.scrollTop){anchor={id:el.dataset.id,off:el.offsetTop-sc.scrollTop};break}
+  Object.assign(L,{sig,all,follow,ids:new Set(recent.map(m=>m.id)),msgs:[],out:new Map(),byId:new Map(list.map(m=>[m.id,m])),tail:null,lastId:0});
+  b.innerHTML=chatHTML(recent,false); logSnap=false;
+  if(stick){sc.scrollTop=sc.scrollHeight; L.pin=true; L.unseen=0}
+  else if(anchor){const el=b.querySelector(`.row[data-id="${anchor.id}"]`); if(el)sc.scrollTop=el.offsetTop-anchor.off}
+  jumpBtn();
 }
-$("#logb").addEventListener("click",e=>{const tr=e.target.closest("tr.m"); if(!tr)return;
-  if(e.target.closest("td.t")){const m=order.flatMap(k=>SYS[k].msgs).find(x=>x.id===+tr.dataset.id); if(m&&SYS[m.sys]&&SYS[m.sys].T.length){if(m.sys!==watching){watching=m.sys; bindRun(SYS[watching])} goPage("live"); rpSet(m.t,false)} return} const id=+tr.dataset.id; open.has(id)?open.delete(id):open.add(id); logDirty=true; renderLog()});
+$("#logb").addEventListener("click",e=>{const row=e.target.closest(".row"); if(!row)return; const id=+row.dataset.id;
+  const qt=e.target.closest(".qt"); if(qt){const el=$("#logb").querySelector(`.row[data-id="${qt.dataset.q}"]`); if(el){stopGlide(); flashId=+qt.dataset.q; flashAt=performance.now(); el.scrollIntoView({block:"center",behavior:"smooth"}); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash")} return}
+  if(e.target.closest(".tm")){const m=order.flatMap(k=>SYS[k].msgs).find(x=>x.id===id); if(m&&SYS[m.sys]&&SYS[m.sys].T.length){if(m.sys!==watching){watching=m.sys; bindRun(SYS[watching])} goPage("live"); rpSet(m.t,false)} return}
+  if(e.target.closest(".why")||String(getSelection()))return;
+  open.has(id)?open.delete(id):open.add(id); logDirty=true; renderLog()});
+// the reader scrolling up un-pins the chat (new messages then wait behind the ↓ button); scrolling back down pins it again
+["wheel","touchstart","mousedown","keydown"].forEach(t=>$("#logscroll").addEventListener(t,stopGlide,{passive:true}));
+$("#logscroll").addEventListener("scroll",()=>{if(autoOn)return; const p=logAtBottom(); if(p!==L.pin){L.pin=p; if(p)L.unseen=0; jumpBtn()}},{passive:true});
+$("#logjump").addEventListener("click",()=>{L.pin=true; L.unseen=0; jumpBtn(); glide()});
 $("#f-ag").addEventListener("click",e=>{const b=e.target.closest("button"); if(!b)return; const n=b.dataset.n, names=[...$("#f-ag").querySelectorAll("button")].map(x=>x.dataset.n);
   if(!agFilter.size){agFilter=new Set([n])} else if(agFilter.has(n)){agFilter.delete(n)} else agFilter.add(n);
   if(agFilter.size===names.length)agFilter.clear(); logDirty=true; renderLog()});
-["#f-sys","#f-prob","#f-follow"].forEach(s=>$(s).addEventListener("change",()=>{logDirty=true;renderLog()}));
+["#f-sys","#f-prob","#f-follow"].forEach(s=>$(s).addEventListener("change",()=>{logDirty=true;logSnap=true;renderLog()}));
 $("#f-q").addEventListener("input",()=>{logDirty=true;renderLog()});
 
 /* ====================================================================== live page: score + 3D binding */
@@ -1421,7 +1579,7 @@ function setMode(m){
 }
 function start(meta){
   META=meta; initLayout(META); SYS={}; order=META.systems.map(s=>s.key); META.systems.forEach(s=>SYS[s.key]=newSys(s.key,s.label));
-  watching=SYS.multi?"multi":order[0]; seq=0; open.clear(); agFilter.clear(); logSeen=0;
+  watching=SYS.multi?"multi":order[0]; seq=0; open.clear(); agFilter.clear(); logSeen=0; logSnap=true; flashId=0; L.pin=true; L.unseen=0; L.lastId=0; L.queue=[];
   $("#watch").innerHTML=`<span class="lb">Showing</span>`+META.systems.map(s=>`<button data-k="${s.key}"><i class="sw" style="background:${SCOL[s.key]}"></i>${esc(SHORT[s.key]||s.label)}</button>`).join("");
   $("#f-sys").innerHTML=META.systems.map(s=>`<option value="${s.key}">${esc(s.label)}</option>`).join("")+`<option value="all">All strategies</option>`;
   $("#qcs").innerHTML=META.cranes.map(c=>`<button type="button" aria-pressed="false">${c}</button>`).join("");
@@ -1497,7 +1655,7 @@ $("#breaknow").onclick=async()=>{const cr=[...document.querySelectorAll("#qcs bu
   catch(x){m.classList.add("err");m.textContent="Not applied: "+x.message}};
 $("#opsend").onclick=async()=>{const t=$("#optext").value.trim(); if(!t)return; const m=$("#opmsg");
   try{const r=await fetch("/api/operator",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:t})}); if(!r.ok)throw new Error("HTTP "+r.status);
-    if(SYS.multi)addMsg(SYS.multi,{tick:-1,t:SYS.multi.nowT,fk:"judges",to:"VerteX",text:`“${esc(t)}”`,out:["sent","warn"],why:"Goes to VerteX's operator channel.",kind:"judge"});
+    if(SYS.multi)SYS.multi.lastOp=addMsg(SYS.multi,{tick:-1,t:SYS.multi.nowT,fk:"judges",to:"VerteX",text:`“${esc(t)}”`,out:["sent","warn"],why:"Goes to VerteX's operator channel.",kind:"judge"}).id;
     $("#optext").value=""; m.hidden=false; m.className="fb ok"; m.textContent="Sent to VerteX."}
   catch(x){m.hidden=false;m.className="fb err";m.textContent="Not sent: "+x.message}};
 
