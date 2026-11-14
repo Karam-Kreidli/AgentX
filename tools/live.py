@@ -391,14 +391,21 @@ def import_workbook(raw: bytes, filename: str) -> dict:
     for old, new in rename.items():
         try:
             api = base_api(new, path, None)
+            api.get_vessel_schedule()                         # the simulator can read it (a text in a number column fails here)
             v = api.calls.values()
             ev = api.events["event_type"].value_counts().to_dict() if len(api.events) else {}
-            STATE["uploads"][new] = path
-            added.append({"id": new, "from": old, "file": filename, "ships": len(api.calls),
-                          "moves": int(sum(c["discharge_moves"] + c["load_moves"] for c in v)),
-                          "events": {str(k): int(n) for k, n in ev.items()}})
+            entry = {"id": new, "from": old, "file": filename, "ships": len(api.calls),
+                     "moves": int(sum(c["discharge_moves"] + c["load_moves"] for c in v)),
+                     "events": {str(k): int(n) for k, n in ev.items()}}
+            STATE["uploads"][new] = path                      # listed only once every check above passed
+            added.append(entry)
         except Exception as e:
             errors.append(f"Scenario {old} does not run: {type(e).__name__}: {e}"[:300])
+    if not added:                                             # nothing usable: don't keep it for the next restart
+        try:
+            path.unlink()
+        except OSError:
+            pass
     return {"added": added, "errors": errors}
 
 

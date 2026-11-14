@@ -336,3 +336,15 @@ def test_malformed_scenario_runs_clean_and_each_finding_is_escalated_once(tmp_pa
     assert len(found) == len(set(found))                                         # each reported once
     if words:
         assert any(words in f for f in found), found
+
+
+def test_a_problem_quoting_a_changing_value_is_reported_once():
+    """Bad remaining moves quote the load left, which changes every tick: still one report per scenario."""
+    from core import validate as v
+    v.reset()
+    r = v._Report()
+    for load in (503, 491, 480):
+        r.add(f"'X-1' has unreadable remaining moves (discharge '-500', load '{load}').", "manifest counts used.",
+              key="moves:X-1")
+    assert len(r.found) == 1
+    v.reset()
