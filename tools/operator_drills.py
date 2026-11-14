@@ -38,6 +38,10 @@ def main() -> int:
         print(("PASS " if r["pass"] else "FAIL ") + f"{r['expected']:8} {str(r['command']):20} {r['message'][:70]}")
         if not r["pass"]:
             print(f"       why: {r['why']}")
+    if rows and all(r["command"] is None for r in rows):
+        print("\nThe model never answered (every message came back unread), so these results say nothing.")
+        print("Check the endpoint first: python ops/vllm/healthcheck.py --backend local")
+        return 2
     n = sum(r["pass"] for r in rows)
     print(f"\n{n}/{len(rows)} drills passed")
     return 0 if n == len(rows) else 1
