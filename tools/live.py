@@ -38,7 +38,8 @@ from typing import Optional
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-PAGE = ROOT / "tools" / "live_dashboard.html"
+DASH_DIR = ROOT / "tools" / "dashboard"
+MIME = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}
 LIVE_DIR = ROOT / "runs" / "live"
 CACHE_DIR = ROOT / "runs" / "live_cache"
 _CACHE_LOCK = threading.Lock()
@@ -464,11 +465,16 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(n) or b"{}") if n else {}
 
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
-            raw = PAGE.read_bytes()
+        name = self.path.split("?", 1)[0]
+        if name == "/":
+            name = "/index.html"
+        asset = DASH_DIR / name.lstrip("/")
+        if (not name.startswith("/api/") and asset.suffix in MIME and asset.parent == DASH_DIR and asset.is_file()):
+            raw = asset.read_bytes()
             self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Type", MIME[asset.suffix])
             self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(raw)
         elif self.path == "/api/template":
