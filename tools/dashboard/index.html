@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>VerteX Live</title>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700;6..12,800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <script src="theme-init.js"></script>
+</head>
+
+<body>
+  <header id="top">
+    <div class="brand"><b>Verte<span>X</span></b><small>Terminal operations</small></div>
+    <nav id="nav">
+      <a href="#scenario" data-p="scenario"><i>1</i>Scenario</a>
+      <a href="#live" data-p="live"><i>2</i>Live</a>
+      <a href="#messages" data-p="messages"><i>3</i>Messages</a>
+      <a href="#results" data-p="results"><i>4</i>Results</a>
+    </nav>
+    <div id="status"><i class="sq"></i><span id="statustx">No run yet</span></div>
+    <button id="themebtn" type="button" aria-label="Switch between light and dark"><svg viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+      </svg><span>Dark</span></button>
+    <div class="speed"><label for="rate">Speed</label><input id="rate" type="range" min="0.5" max="10" step="0.5"
+        value="2"><output id="rateL">2 h/s</output></div>
+    <button id="stopbtn" hidden>Stop run</button>
+  </header>
+
+  <main>
+    <!-- 1. scenario -->
+    <section class="page" id="p-scenario">
+      <form class="setup" id="form">
+        <header>
+          <div>
+            <h2>Set up a run</h2>
+            <p>Start from one of the practice days and change it. Every strategy you tick gets exactly the same
+              scenario, from the same seed, and they all run at the same time.</p>
+          </div>
+        </header>
+        <div class="col">
+          <div class="fld"><label for="base">Starting scenario</label>
+            <div><select id="base"></select><small id="basenote">Its ships, cargo and berth schedule. Everything below
+                changes it.</small>
+              <div class="drop" id="drop"><b>New scenario: upload it, or drag the file here</b><span>An .xlsx laid out
+                  like the practice data: Practice_Vessels, Practice_Manifest and, if you like, Practice_Events.
+                  Hidden_* sheets from an answer key work too.</span>
+                <span class="acts"><button type="button" class="btn" id="browse">Upload a scenario (.xlsx)</button><a
+                    class="add" href="/api/template" download style="align-self:center">Download a template</a></span>
+                <input type="file" id="file" accept=".xlsx" hidden>
+              </div>
+              <div id="upmsg" class="fb" hidden></div>
+            </div>
+          </div>
+          <div class="fld"><span class="lb">Ship arrivals</span>
+            <div>
+              <div class="seg" id="arrivals">
+                <button type="button" data-v="schedule" aria-pressed="true">On schedule</button><button type="button"
+                  data-v="bunched">Bunched</button><button type="button" data-v="late">Late</button><button
+                  type="button" data-v="early">Early</button>
+              </div>
+              <small id="arrnote">As planned.</small>
+            </div>
+          </div>
+          <div class="fld"><span class="lb">Crane breakdowns</span>
+            <div>
+              <div class="brkhd"><span>Crane</span><span>From hour</span><span>For hours</span><span></span></div>
+              <div id="brks"></div><button type="button" class="add" id="addbrk">+ Add a breakdown</button><small>Hours
+                count from the first ship's arrival.</small>
+            </div>
+          </div>
+          <div class="fld"><span class="lb">Trucks out of service</span>
+            <div class="grid3"><label>How many<input type="number" id="tr_n" min="0" max="15"
+                  value="0"></label><label>From hour<input type="number" id="tr_at" min="0" max="100"
+                  value="8"></label><label>For hours<input type="number" id="tr_h" min="1" max="48" value="6"></label>
+            </div>
+          </div>
+          <div class="fld"><label for="holds">Customs holds</label>
+            <div><input type="range" id="holds" min="0" max="120" step="5" value="0"><small><span class="val"
+                  id="holdsL">0</span> import boxes held back</small></div>
+          </div>
+          <div class="fld"><label for="yard">Yard space</label>
+            <div><input type="range" id="yard" min="60" max="130" step="5" value="100"><small><span class="val"
+                  id="yardL">100 %</span> of normal. Less space means ships wait for room to unload.</small></div>
+          </div>
+          <div class="fld"><label for="seed">Seed</label>
+            <div><input type="number" id="seed" value="7" min="1" max="99999" style="max-width:140px"><small>Decides the
+                random parts (late arrivals, which trucks break).</small></div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="fld" style="grid-template-columns:minmax(0,1fr)"><span class="lb">Strategies to compare</span>
+            <div class="strats" id="systems"></div>
+          </div>
+          <div class="fld" style="grid-template-columns:minmax(0,1fr)"><span class="lb">Language model</span><button
+              type="button" class="chk" id="llm" aria-pressed="false">
+              <div><b>Use the language model for VerteX</b><span id="llmnote">On: the model picks between plans our
+                  agents prepare, and reads messages typed in the operator channel. Off: rules only, and operator
+                  messages are not acted on. If the model stops answering mid-run, VerteX carries on with rules.</span>
+              </div>
+            </button></div>
+          <div class="startbar"><button class="btn primary" id="go" type="submit">Start run</button><span id="runnote"
+              hidden>A run is in progress. Starting a new one stops it.</span></div>
+          <div class="err" id="err" hidden style="margin-top:10px"></div>
+        </div>
+      </form>
+    </section>
+
+    <!-- 2. live -->
+    <section class="page" id="p-live" hidden>
+      <div id="stage">
+        <div id="stars" aria-hidden="true"></div>
+        <div id="sun" aria-hidden="true"></div>
+        <div id="moon" aria-hidden="true"></div>
+        <div id="plane" aria-hidden="true"><i></i></div>
+        <div id="sky" aria-hidden="true"><i
+            style="top:5%;width:260px;height:46px;animation-duration:150s;animation-delay:-20s"></i><i
+            style="top:12%;width:180px;height:34px;animation-duration:120s;animation-delay:-70s"></i><i
+            style="top:3%;width:140px;height:28px;animation-duration:170s;animation-delay:-110s"></i><i
+            style="top:18%;width:220px;height:40px;animation-duration:140s;animation-delay:-5s"></i><i
+            style="top:9%;width:120px;height:24px;animation-duration:110s;animation-delay:-55s"></i><i
+            style="top:22%;width:300px;height:52px;animation-duration:190s;animation-delay:-140s"></i></div>
+        <canvas id="gl" aria-label="3D view of the terminal for the strategy you are watching"></canvas>
+        <div id="labels"></div>
+        <div class="bar">
+          <div class="tool" id="watch" role="group" aria-label="Strategy shown"><span class="lb">Showing</span></div>
+          <div style="display:flex;gap:8px">
+            <div class="tool" id="cams" role="group" aria-label="Camera"><span class="lb">Camera</span><button
+                data-cam="over" aria-pressed="true">Overview</button><button data-cam="quay">Quay</button><button
+                data-cam="sea">Anchorage</button><button data-cam="yard">Yard</button><button
+                data-cam="top">Plan</button></div>
+            <div class="tool" role="group" aria-label="Effects"><button id="tourbtn" aria-pressed="false"
+                title="The camera flies between the busiest spots by itself">Tour</button><button id="fxbtn"
+                aria-pressed="true" title="Draw each berth and yard decision as it is made">Decisions</button><button
+                id="skybtn" aria-pressed="true" title="Sun and sky follow the simulated clock">Live sky</button></div>
+            <div class="tool"><button id="fullbtn" style="border-left:0" title="Full screen (F)">Full screen</button>
+            </div>
+          </div>
+        </div>
+        <div id="clock" hidden><small id="clocklb">VerteX</small><b id="clockv">–</b></div>
+        <div id="tl" hidden role="group" aria-label="Go back in time">
+          <button id="tl-back" type="button" title="Back 15 min (←)" aria-label="Back 15 minutes"><svg
+              viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 6 5 12l6 6M19 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2"
+                stroke-linecap="round" stroke-linejoin="round" />
+            </svg></button>
+          <button id="tl-play" type="button" title="Play from here (Space)" aria-label="Play"><svg viewBox="0 0 24 24"
+              aria-hidden="true">
+              <path d="M8 5v14l11-7z" fill="currentColor" />
+            </svg></button>
+          <button id="tl-fwd" type="button" title="Forward 15 min (→)" aria-label="Forward 15 minutes"><svg
+              viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m13 6 6 6-6 6M5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2"
+                stroke-linecap="round" stroke-linejoin="round" />
+            </svg></button>
+          <div class="track">
+            <div id="tl-fill"></div>
+            <div id="tl-marks"></div><input id="tl-r" type="range" min="0" max="1" step="0.01" value="1"
+              aria-label="Simulation time">
+          </div>
+          <span id="tl-t">Live</span>
+          <button id="tl-live" type="button" title="Back to now (L)" aria-pressed="true"><i></i>Live</button>
+        </div>
+        <div id="legend"><span><i class="sw" style="background:var(--amber)"></i>crane</span><span><i class="sw"
+              style="background:var(--red)"></i>out of service</span><span>drag to turn · scroll to zoom</span></div>
+        <div id="idle">
+          <div>
+            <h2>No run yet</h2>
+            <p>Set up a scenario and start it. The terminal appears here.</p><a class="btn primary" href="#scenario">Set
+              up a scenario</a>
+          </div>
+        </div>
+      </div>
+      <div id="strip">
+        <div class="hd">
+          <h3><span id="striphd">Latest messages</span> · <span id="striplb">VerteX</span> <span class="muted"
+              style="font-weight:400">· newest at the bottom</span></h3><a class="note" href="#messages">All messages
+            →</a>
+        </div>
+        <div id="stripv">
+          <table class="msgs">
+            <tbody id="stripb"></tbody>
+          </table>
+        </div>
+      </div>
+      <aside id="rail">
+        <section>
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <h3>Score</h3><span class="muted" style="font-size:12px" id="cmpat"></span>
+          </div>
+          <table class="score">
+            <thead>
+              <tr>
+                <th>Strategy</th>
+                <th>Sailed</th>
+                <th>Avg h</th>
+                <th>Moves/h</th>
+              </tr>
+            </thead>
+            <tbody id="scoreb"></tbody>
+          </table>
+          <div id="delta" hidden></div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:14px">
+            <h3>Other KPIs</h3><a class="add" href="#results" style="font-size:12px">All KPIs →</a>
+          </div>
+          <table class="mini">
+            <thead id="minih"></thead>
+            <tbody id="minib"></tbody>
+          </table>
+        </section>
+        <section id="judge">
+          <h3>Disruption</h3>
+          <div class="muted" style="font-size:12.5px;margin-top:3px">Hits every strategy at once, 30 minutes of
+            simulated time from now.</div>
+          <div class="qc" id="qcs"></div>
+          <div class="two"><label>Trucks down<input type="number" id="j_tr" min="0" max="15"
+                value="0"></label><label>For hours<input type="number" id="j_h" min="1" max="24" value="4"></label>
+          </div>
+          <button class="btn warn" id="breaknow">Apply disruption</button>
+          <div class="fb" id="brkmsg" hidden></div>
+        </section>
+        <section id="opbox">
+          <h3>Message to the operator channel</h3>
+          <div class="muted" style="font-size:12.5px;margin:3px 0 8px" id="opnote"></div>
+          <input type="text" id="optext" maxlength="300" placeholder="Type a message, or pick one below">
+          <div class="presets" id="presets"></div>
+          <button class="btn" id="opsend" style="margin-top:8px">Send</button>
+          <div class="fb ok" id="opmsg" hidden></div>
+        </section>
+        <section id="ended" hidden>
+          <h3 id="endedh">Run stopped</h3>
+          <p id="endedp"></p>
+          <div class="two" style="margin:0"><button class="btn primary" id="again">Run again</button><a class="btn"
+              href="#scenario">Change scenario</a></div>
+        </section>
+      </aside>
+    </section>
+
+    <!-- 3. messages -->
+    <section class="page" id="p-messages" hidden>
+      <aside id="filters">
+        <div class="grp"><label class="lb" for="f-sys">Strategy</label><select id="f-sys"></select></div>
+        <div class="grp"><span class="lb">From</span>
+          <div class="ag" id="f-ag"></div>
+        </div>
+        <div class="grp"><label class="tg"><input type="checkbox" id="f-prob"> Only refusals, blocks and
+            alerts</label><label class="tg"><input type="checkbox" id="f-follow" checked> Follow live (newest at the
+            bottom)</label></div>
+        <div class="grp"><span class="lb">This strategy so far</span>
+          <div class="stats">
+            <div><b id="s-rounds">0</b>decision rounds</div>
+            <div><b id="s-msgs">0</b>messages</div>
+            <div><b id="s-ref">0</b>refused by the coordinator</div>
+            <div><b id="s-blk">0</b>blocked by the rule check</div>
+          </div>
+        </div>
+      </aside>
+      <div id="logwrap">
+        <div id="logbar">
+          <h2>Messages</h2><input type="search" id="f-q" placeholder="Search ship, block, crane…"
+            style="max-width:280px"><span class="muted" style="font-size:12.5px" id="logcount"></span>
+        </div>
+        <div id="logscroll">
+          <div id="logb" class="chat"></div>
+          <div id="logempty">Nothing yet. Messages appear here as soon as a run starts.</div>
+        </div>
+        <button type="button" id="logjump" hidden aria-label="Jump to the newest message"><svg viewBox="0 0 24 24"
+            aria-hidden="true">
+            <path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+              stroke-linejoin="round" />
+          </svg><b hidden></b></button>
+      </div>
+    </section>
+
+    <!-- 4. results -->
+    <section class="page" id="p-results" hidden>
+      <div class="res">
+        <header>
+          <div>
+            <h2>Results</h2>
+            <p id="resnote">Start a run to compare the strategies.</p>
+          </div>
+        </header>
+        <div class="kpibox">
+          <table class="big kpi" id="kpit">
+            <tbody id="resb"></tbody>
+          </table>
+        </div>
+        <p class="muted kpinote" id="kpinote"></p>
+        <div class="figs">
+          <div class="fig">
+            <div class="hd">
+              <h3>Average turnaround as the days go by</h3><span class="note">ships still in port count up to the
+                current time</span>
+            </div>
+            <div class="cv"><canvas id="linec"></canvas></div>
+          </div>
+          <div class="fig">
+            <div class="hd">
+              <h3>Berth timeline per strategy</h3><span class="note">dotted: waiting at anchor · bar: at berth · red:
+                crane out of service</span>
+            </div>
+            <div class="gantts" id="gantts"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+
+</html>
