@@ -733,7 +733,8 @@ const PAL={standard:["#b8402f","#d26d2c","#2f6da3","#2f8a63","#98a1a5","#dcb957"
   empty:["#98a1a5","#b3babd","#77838a","#2f6da3","#98a1a5"].map(hex)};
 const C={sea:hex("#2d7fa3"),ground:hex("#a9b3a5"),apron:hex("#b9bdb8"),road:hex("#7f878a"),pad:hex("#a3a8a5"),paint:hex("#f4f4ef"),
   yellow:hex("#e8a43a"),craneY:hex("#e8a43a"),steel:hex("#8d999e"),white:hex("#f2f4f2"),grey:hex("#a8b0b3"),red:hex("#d0553f"),
-  shed:hex("#c9cfd0"),shed2:hex("#9fb1b8"),dark:hex("#4a5459"),boot:hex("#8a3a2c"),cab:hex("#f1f3f1"),lamp:[1,.95,.8],win:[.62,.78,.88],teal:hex("#e8e4d8")};
+  shed:hex("#c9cfd0"),shed2:hex("#9fb1b8"),dark:hex("#4a5459"),boot:hex("#8a3a2c"),cab:hex("#f1f3f1"),lamp:[1,.95,.8],win:[.62,.78,.88],teal:hex("#e8e4d8"),
+  land:hex("#cdb894"),sand:hex("#e8d9b5"),sand2:hex("#cbb78f"),mtn:hex("#a38d74"),mtn2:hex("#8c7865"),mtn3:hex("#b6a48e"),town:hex("#f1ece1"),town2:hex("#dcd2be"),dome:hex("#e3cf98"),reef:hex("#5fb7c0"),palm:hex("#6f9446"),palm2:hex("#587a36")};
 const FOG=hex("#e3ecf0");
 const hash=(a,b)=>{let x=(Math.imul(a+1,2654435761)^Math.imul(b+7,40503))>>>0;x^=x>>>13;x=Math.imul(x,1274126177)>>>0;return x>>>8};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)), lerp=(a,b,t)=>a+(b-a)*t;
@@ -777,7 +778,7 @@ if(gl){
     if(water){ vec3 V=normalize(uEye-vW); vec3 Hh=normalize(L+V); float sp=pow(max(dot(wn,Hh),0.),110.); float fr=pow(1.-clamp(V.y,0.,1.),4.);
       lit=mix(lit,uFog,fr*.4)+uSun*sp*.85; }
     if(vK>2.5) lit=col;
-    float f=smoothstep(70.,230.,length(vW-uEye)); o=vec4(mix(lit,uFog,f),1.); }`;
+    float f=smoothstep(95.,330.,length(vW-uEye)); o=vec4(mix(lit,uFog,f),1.); }`;
   const sh=(t,s)=>{const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))console.error(gl.getShaderInfoLog(x));return x};
   const prog=gl.createProgram();gl.attachShader(prog,sh(gl.VERTEX_SHADER,vs));gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,fs));
   ["aPos","aNorm","iPos","iScale","iColor","iMisc"].forEach((n,i)=>gl.bindAttribLocation(prog,i,n));
@@ -849,14 +850,68 @@ function along(pts,s){ let tot=0; const len=[]; for(let i=1;i<pts.length;i++){co
 function seg(x1,y1,z1,x2,y2,z2,t,c,n,k){
   for(let i=0;i<n;i++){const a=(i+.5)/n;
     box(lerp(x1,x2,a),lerp(y1,y2,a),lerp(z1,z2,a),Math.max(t,Math.abs(x2-x1)/n*1.08),Math.max(t,Math.abs(y2-y1)/n*1.08),Math.max(t,Math.abs(z2-z1)/n*1.08),c,k||0)}}
-function tree(x,z,s,v){box(x,.45*s,z,.14*s,.9*s,.14*s,C.trunk); box(x,1.05*s,z,.9*s,.7*s,.9*s,v?C.tree2:C.tree); box(x,1.55*s,z,.55*s,.5*s,.55*s,v?C.tree:C.tree2)}
 function fence(x1,z1,x2,z2,c,h){const n=Math.max(2,Math.round(Math.hypot(x2-x1,z2-z1)/2));
   for(let i=0;i<=n;i++){const a=i/n; box(lerp(x1,x2,a),h/2,lerp(z1,z2,a),.07,h,.07,c)}
   box((x1+x2)/2,h,(z1+z2)/2,Math.abs(x2-x1)+.07,.05,Math.abs(z2-z1)+.07,c); box((x1+x2)/2,h*.5,(z1+z2)/2,Math.abs(x2-x1)+.07,.03,Math.abs(z2-z1)+.07,c)}
 
+/* ---------- Khor Fakkan: the terminal on a peninsula, the land it joins at the west end with the Hajar
+   mountains, Shark Island offshore, and the city and beach across the bay behind it. Scenery only. ---------- */
+const SHORE=x=>-45-50*(1-Math.exp(-(x+47)/90));     // the far shore of the bay (x >= -47)
+const ROAD=(()=>{const p=[[36,-35],[-50,-35],[-54,-42]]; for(let x=-46;x<=230;x+=10)p.push([x,SHORE(x)-6]); return p})();
+const ROADLEN=ROAD.slice(1).reduce((a,q,i)=>a+Math.hypot(q[0]-ROAD[i][0],q[1]-ROAD[i][1]),0);
+function roadStrip(pts,w){ for(let i=1;i<pts.length;i++){ const A=pts[i-1],B=pts[i],dx=B[0]-A[0],dz=B[1]-A[1],L=Math.hypot(dx,dz),r=Math.atan2(-dz,dx);
+  box((A[0]+B[0])/2,.02,(A[1]+B[1])/2,L+.6,.05,w,C.road,0,r); for(let d=1.5;d<L;d+=3) box(A[0]+dx*d/L,.06,A[1]+dz*d/L,1.3,.02,.09,C.paint,0,r) } }
+function palm(x,z,s,i){ const lean=((hash(i,1)%7)-3)*.05*s, h=3.2*s;
+  for(let k=0;k<3;k++) box(x+lean*(k+.5),h*(k+.5)/3,z,.2*s,h/3*1.05,.2*s,C.trunk);
+  const tx=x+lean*3;
+  for(let f=0;f<6;f++){ const a=f*1.047+(hash(i,2)%10)/10, ex=Math.cos(a), ez=Math.sin(a);
+    box(tx+ex*.55*s,h+.05*s,z+ez*.55*s,1.0*s,.1*s,.3*s,f%2?C.palm:C.palm2,0,-a);
+    box(tx+ex*1.25*s,h-.3*s,z+ez*1.25*s,.8*s,.1*s,.26*s,f%2?C.palm2:C.palm,0,-a) }
+  box(tx,h-.1*s,z,.32*s,.3*s,.32*s,C.trunk) }
+// a rocky peak: five shrinking layers, two twisted boxes each, the summit pushed off-centre
+function peak(x,z,h,w,i){ const n=5; for(let k=0;k<n;k++){ const f=1-k/n, sz=w*Math.pow(f,.85), y=-1+h*(k+.5)/n;
+  const jx=((hash(i,k)%9)-4)*.05*w*(1-f), jz=((hash(i,k+9)%9)-4)*.05*w*(1-f);
+  box(x+jx,y,z+jz,sz,h/n*1.05,sz*.8,k===n-1?C.mtn3:(k+i)%2?C.mtn:C.mtn2,0,(hash(i,k+3)%60)/60*1.6);
+  box(x-jx*.6,y,z-jz*.6,sz*.75,h/n*1.05,sz*.95,k%2?C.mtn2:C.mtn,0,(hash(i,k+7)%60)/60*1.6+.5) } }
+function mosque(x,z){ box(x,1.4,z,6,2.8,6,C.town); box(x,2.9,z,6.3,.2,6.3,C.town2);
+  for(const [r,y,w] of [[0,3.6,3.6],[Math.PI/4,3.6,3.6],[0,4.5,2.8],[Math.PI/4,4.5,2.8],[0,5.2,1.6]]) box(x,y,z,w,1.0,w,C.dome,0,r);
+  box(x,6.2,z,.12,.9,.12,C.dome);
+  for(const o of [-3.6,3.6]){ box(x+o,4,z+2.6,.8,8,.8,C.town); box(x+o,7.2,z+2.6,1.2,.25,1.2,C.town2); box(x+o,8.4,z+2.6,.55,1.4,.55,C.town); box(x+o,9.4,z+2.6,.3,.7,.3,C.dome) } }
+const MOSQUES=[25,118];
+function kfBuild(){
+  // the land the peninsula joins at its west end, and the land behind the far shore
+  box(-323.5,-1.5,-250,553,3,500,C.land);
+  for(let x=-47;x<600;x+=6){ const z0=SHORE(x+3)-2; box(x+3,-1.5,(z0-500)/2,6.2,3,z0+500,C.land) }
+  // the beach along the far shore: wet sand at the waterline, dry sand up to the corniche
+  for(let x=-47;x<262;x+=8){ const az=SHORE(x), bz=SHORE(x+8), dz=bz-az, L=Math.hypot(8,dz), r=Math.atan2(-dz,8), nx=-dz/L, nz=8/L, mx=x+4, mz=(az+bz)/2;
+    box(mx+nx*.6,-.95,mz+nz*.6,L+.5,.3,3.2,C.sand2,0,r); box(mx-nx*1.2,-.55,mz-nz*1.2,L+.5,1.1,3.4,C.sand,0,r) }
+  roadStrip(ROAD.slice(2),2.6);
+  for(let i=0,x=-40;x<=230;i++,x+=7) palm(x,SHORE(x)-3.4,1.05+(hash(i,4)%4)/12,100+i);
+  // Khor Fakkan: low white and sand-coloured buildings, a few taller ones, two mosques
+  for(let j=0;j<2;j++) for(let i=0;i<92;i++){ const x=-38+i*2.95+(hash(i,j+1)%10)/10; if(x>235||MOSQUES.some(m=>Math.abs(x-m)<5.5))continue;
+    const zs=SHORE(x)-10.5-j*8.5-(hash(i,j+2)%6), tall=hash(i,j+3)%9===0, h=tall?6+hash(i,4)%6:1.4+(hash(i,j+5)%5)*.75, w=2.1+(hash(i,6)%4)*.45, d=2.6+(hash(i,7)%3)*.6;
+    box(x,h/2,zs,w,h,d,(i+j)%3?C.town:C.town2); box(x,h+.08,zs,w+.15,.16,d+.15,C.town2);
+    for(let y=.9;y<h-.4;y+=1.3) if(hash(i,(y*10|0)+j)%3) box(x,y,zs+d/2+.03,w*.72,.32,.04,C.win,3) }
+  for(const x of MOSQUES) mosque(x,SHORE(x)-13);
+  // the Hajar mountains behind the city, three ranges, the last ones hazy
+  for(let row=0;row<3;row++) for(let i=0;i<24;i++){ const x=-60+i*13+(hash(i,row)%7), z=SHORE(Math.max(-47,x))-34-row*25-(hash(i,row+5)%10);
+    peak(x,z,[13,24,36][row]+hash(i,row+2)%[9,14,18][row],[22,30,40][row]+hash(i,row+4)%10,i*3+row) }
+  // the west end: low rocky hills behind the depot, then mountains rising inland
+  for(let i=0;i<10;i++) peak(-106-i*15-(hash(i,1)%6),-8-(hash(i,2)%14),8+hash(i,3)%8,16+hash(i,4)%6,200+i);
+  for(let row=0;row<3;row++) for(let i=0;i<10;i++) peak(-70-i*18-(hash(i,row)%8)-row*6,-52-row*26-(hash(i,row+3)%10),[16,28,40][row]+hash(i,row+6)%12,[20,28,38][row]+hash(i,row+1)%8,300+row*20+i);
+  // Shark Island, off the west end: a low brown rocky hump with a shallow turquoise reef round it
+  for(const [w,d,r] of [[21,8.5,.25],[16,10,.6]]) box(-74,-.94,40,w,.06,d,C.reef,0,r);
+  peak(-73,40,4.6,13,500); peak(-78.5,40.6,2.6,7,501); peak(-68.5,39.2,2.2,6,502);
+  for(let i=0;i<16;i++){ const a=i/16*6.283, s=1+(hash(i,5)%10)/9, p=local(-74,40,.25,Math.cos(a)*(7.2+(hash(i,3)%10)/5),Math.sin(a)*(2.8+(hash(i,4)%10)/8)); box(p[0],-.75+(hash(i,8)%5)/12,p[1],s+.5,s*.8,s+.4,i%3?C.mtn2:C.mtn,0,i*.7) }
+}
+const KF={c:null,w:null,n:0,data:null};
+function kfScene(){
+  if(KF.data&&KF.c===C.sea&&KF.w===C.win){ if(ni+KF.n<=MAXI){inst.set(KF.data,ni*STR); ni+=KF.n} return }
+  const n0=ni; kfBuild(); KF.n=ni-n0; KF.data=inst.slice(n0*STR,ni*STR); KF.c=C.sea; KF.w=C.win }
+
 /* ---------- the parts of the terminal that don't move ---------- */
 function staticScene(){
-  box(0,-1.5,90,520,1,200,C.sea,1); box(0,-2,-70,520,4,140,C.ground);
+  box(0,-1.5,0,1200,1,1200,C.sea,1); box(0,-2,-19.25,94,4,38.5,C.ground);   // sea all round; the terminal stands on a peninsula
   // quay: apron, face, fenders, bollards, safety line, crane rails with end stops
   box(0,.02,-3.9,82,.06,7.8,C.apron); box(0,-.9,-.02,82,2.2,.3,C.dark);
   for(let x=-39;x<=39;x+=3) box(x,-.45,.17,.55,.75,.22,C.tyre);
@@ -896,61 +951,36 @@ function staticScene(){
   for(let i=0;i<10;i++){ const x=-17.4+(i%5)*1.1, z=-22.6-((i/5)|0)*1.5, col=SHIPC[hash(i,5)%SHIPC.length];
     box(x,.05,z,.95,.02,1.3,C.paint); if(hash(i,9)%4){ box(x,.22,z,.48,.22,.95,col); box(x,.42,z+.05,.42,.18,.5,C.glass) } }
   fence(-44,-30.5,32.4,-30.5,C.steel,1.1); fence(36.6,-30.5,44,-30.5,C.steel,1.1); fence(-44,-30.5,-44,-7,C.steel,1.1); fence(44,-30.5,44,-7,C.steel,1.1);
-  // gate road out to the public road, and the railway behind it
-  box(34.5,.02,-31.4,3.4,.05,13.4,C.road); for(let z=-27;z>-36;z-=2) box(34.5,.06,z,.08,.02,1.0,C.paint);
-  box(0,.02,-37.6,260,.05,3.0,C.road); for(let x=-128;x<130;x+=3) box(x,.06,-37.6,1.3,.02,.09,C.paint);
-  box(0,.04,-42,260,.08,1.9,C.rock); box(0,.12,-41.55,260,.06,.07,C.steel); box(0,.12,-42.45,260,.06,.07,C.steel);
-  for(let x=-90;x<=90;x+=1.5) box(x,.09,-42,.22,.04,1.5,C.trunk);
-  box(-52,.6,-40.2,.12,1.2,.12,C.steel); box(-52,1.3,-40.2,.3,.5,.2,C.dark); box(-52,1.42,-40.09,.14,.14,.02,[1,.25,.18],3);
-  for(let i=0;i<30;i++){ const x=-46+i*3.2+(hash(i,2)%10)/10, z=-32.5-(hash(i,4)%3); if(Math.abs(x-34.5)>3.2) tree(x,z,.9+(hash(i,8)%5)/10,i%2) }
-  for(let i=0;i<8;i++) tree(-46.5-(i%2)*1.2,-26+i*2.6,.8+(hash(i,3)%4)/10,i%2);
-  for(let i=0;i<8;i++) tree(46.5+(i%2)*1.2,-26+i*2.6,.8+(hash(i,6)%4)/10,i%2);
-  // the town behind the port and hills behind it (fog makes them hazy)
-  for(let i=0;i<38;i++){ const x=-210+i*11.5, h=4+hash(i,7)%15, z=-112-hash(i,3)%22, w=6+hash(i,1)%5, d=5+hash(i,11)%4;
-    box(x,h/2,z,w,h,d,i%3?C.city:C.city2); for(let y=2;y<h-1;y+=2.2) if(hash(i,y|0)%3) box(x,y,z+d/2+.03,w*.7,.5,.04,C.win,3) }
-  for(let i=0;i<9;i++) box(-200+i*50,3,-134-(i%2)*4,70,6+(hash(i,4)%6),20,C.hill);
-  // breakwater with a lighthouse, buoys
-  // --- the wider harbour, so the terminal sits in a real place ---
-  // rock shoreline either side of the quay
-  for(let i=0;i<34;i++){ const s=1.3+(hash(i,5)%10)/9; box(-43.5-i*2.3,-.55+(hash(i,8)%5)/12,.5+(hash(i,2)%4)/5,s+.5,s,s+.3,C.rock); box(43.5+i*2.3,-.55+(hash(i,6)%5)/12,.5+(hash(i,3)%4)/5,s+.5,s,s+.3,C.rock) }
-  // west: empty-container depot with a reach stacker, and warehouses
+  // gate road down to the back road, which runs behind the fence to the land at the west end and on along the corniche
+  box(34.5,.02,-29.4,3.4,.05,9.4,C.road); for(let z=-27;z>-33;z-=2) box(34.5,.06,z,.08,.02,1.0,C.paint);
+  roadStrip(ROAD.slice(0,3),3.0);
+  // palms between the fence and the back road, and down both sides of the terminal
+  for(let i=0;i<26;i++){ const x=-44+i*3.4+(hash(i,2)%10)/10; if(Math.abs(x-34.5)>3.2) palm(x,-32.3,.85+(hash(i,8)%5)/12,i) }
+  for(let i=0;i<8;i++) palm(-45.6,-26+i*2.6,.8+(hash(i,3)%4)/10,40+i);
+  for(let i=0;i<8;i++) palm(45.6,-26+i*2.6,.8+(hash(i,6)%4)/10,60+i);
+  // rock armour round the back of the peninsula and its seaward tip; rock shore along the land to the west
+  for(let i=0;i<41;i++){ const s=1.2+(hash(i,5)%10)/10; box(-46+i*2.3,-.55+(hash(i,8)%5)/12,-38.7-(hash(i,2)%4)/6,s+.5,s,s+.3,C.rock) }
+  for(let i=0;i<17;i++){ const s=1.2+(hash(i,7)%10)/10; box(47.6+(hash(i,4)%4)/6,-.55+(hash(i,9)%5)/12,.4-i*2.3,s+.3,s,s+.5,C.rock) }
+  for(let i=0;i<34;i++){ const s=1.3+(hash(i,5)%10)/9; box(-43.5-i*2.3,-.55+(hash(i,8)%5)/12,.5+(hash(i,2)%4)/5,s+.5,s,s+.3,C.rock) }
+  // west end: empty-container depot with a reach stacker
   for(let c=0;c<7;c++) for(let r=0;r<4;r++){ const h=1+hash(c,r)%4; for(let k=0;k<h;k++) box(-58-c*4.2,.36+k*.62,-9-r*3.4,1.14,.58,2.6,PAL.empty[hash(c*7+r,k)%PAL.empty.length],2) }
   box(-70,.03,-14,34,.05,17,C.pad); box(-54,.55,-25,1.6,.7,.8,C.yellow); box(-54.5,1.1,-25,.5,.5,.6,C.glass); seg(-53.6,.9,-25,-51.6,2.6,-25,.14,C.yellow,6);
-  for(let i=0;i<4;i++){ const x=-66-i*17; box(x,2,-52,14,4,9,i%2?C.shed:C.shed2); box(x,4.15,-52,14.6,.3,9.6,C.roof); for(let d=-4;d<=4;d+=4) box(x+d,1.3,-47.47,2.6,2.6,.05,C.steel) }
-  // east: tank farm with a pipe rack and a flare, then a small marina
-  for(let i=0;i<8;i++){ const x=62+(i%4)*8.5, z=-12-((i/4)|0)*9, r=5.4; box(x,1.8,z,r,3.6,r,C.white); box(x,1.8,z,r,3.6,r,C.white,0,Math.PI/4); box(x,3.65,z,r*.96,.12,r*.96,C.grey); box(x,3.65,z,r*.96,.12,r*.96,C.grey,0,Math.PI/4); box(x+r/2+.05,1.8,z,.1,3.6,.5,C.steel) }
-  box(75,.9,-7,36,.14,.3,C.steel); for(let x=58;x<=92;x+=5.6) box(x,.45,-7,.14,.9,.14,C.steel);
-  box(98,5,-16,.35,10,.35,C.steel); box(98,10.1,-16,.6,.25,.6,C.dark);
-  for(let i=0;i<4;i++){ const x=58+i*7; box(x,-.2,7.5,.9,.16,13,C.grey); for(let j=0;j<4;j++){ const z=3.4+j*3, s=(j+i)%2?1:-1; box(x+s*1.5,-.82,z,1.9,.34,.7,C.white); box(x+s*1.5,-.52,z,.7,.26,.5,(i+j)%3?C.white:SHIPC[(i+j)%SHIPC.length]); box(x+s*1.7,.5,z,.05,2.0,.05,C.steel) } }
-  // inland: business park behind the railway, chimneys, a water tower, a radio mast
-  for(let i=0;i<16;i++){ const x=-48+i*9.6+(hash(i,3)%4), h=2.4+hash(i,9)%4, w=6+hash(i,2)%3, z=-50-(hash(i,6)%7); box(x,h/2,z,w,h,6,i%3?C.city:C.shed); box(x,h+.12,z,w+.4,.24,6.4,C.roof); for(let wx=-w/2+1;wx<w/2;wx+=1.6) box(x+wx,h*.6,z+3.03,.9,.5,.04,C.win,3) }
-  for(const x of [-18,28]){ box(x,4.5,-58,.9,9,.9,C.city2); box(x,9.1,-58,1.1,.3,1.1,C.red) }
-  box(52,3,-56,.5,6,.5,C.steel); box(52,6.6,-56,3,1.6,3,C.white); box(52,6.6,-56,3,1.6,3,C.white,0,Math.PI/4);
-  seg(-64,0,-66,-64,17,-66,.22,C.steel,10); for(const y of [5,10,15]) box(-64,y,-66,.9,.08,.9,C.red);
-  // far mountains behind the town
-  for(let i=0;i<11;i++){ const x=-240+i*48; box(x,7,-176-(i%3)*7,62,14+(hash(i,5)%16),26,C.hill); box(x+16,5,-168,40,10+(hash(i,7)%8),20,C.hill) }
-  // offshore wind farm (towers here, blades turn in drawLife)
-  for(const [x,z] of WIND){ box(x,6,z,.5,14,.5,C.white); box(x,-.6,z,1.4,1.0,1.4,C.yellow); box(x,13.1,z,1.3,.6,.7,C.white) }
-  // the lighthouse island
-  for(let i=0;i<16;i++){ const a=i/16*6.283, r=3+(hash(i,3)%10)/4, s=1.6+(hash(i,5)%10)/8; box(-74+Math.cos(a)*r,-.85+(hash(i,8)%5)/10,40+Math.sin(a)*r*.8,s+.6,s,s+.6,C.rock) }
-  box(-74,-.4,40,5,1.0,4,C.hill); tree(-76,39.4,.8,0); tree(-72.4,41,.7,1);
-  // a small rock island with a lighthouse, off to the west
-  for(let i=0;i<9;i++){ const a=i/9*6.283, r=1.2+(hash(i,3)%10)/8, s=1.3+(hash(i,5)%10)/10; box(-74+Math.cos(a)*r,-.8+(hash(i,8)%5)/10,40+Math.sin(a)*r,s,s,s,C.rock) }
-  box(-74,1.5,40,1.2,4.5,1.2,C.white); box(-74,2.2,40,1.25,.6,1.25,C.red); box(-74,4.2,40,1.6,.25,1.6,C.dark);
+  kfScene();
   // the anchorage: yellow marker buoys round the waiting area, and red/green channel buoys in from the sea
   for(const [x,z] of ANCH_BUOYS){ box(x,-.72,z,.75,.7,.75,C.yellow); box(x,-.1,z,.12,.7,.12,C.dark); box(x,.32,z,.34,.08,.34,C.yellow); box(x,.48,z,.14,.14,.14,[1,.85,.2],3) }
   for(let i=0;i<5;i++){ const z=66+i*16; box(58,-.7,z,.7,.8,.7,C.red); box(58,.0,z,.2,.3,.2,[1,.3,.25],3); box(74,-.7,z,.7,.8,.7,C.tree); box(74,.0,z,.2,.3,.2,[.3,1,.45],3) }
   for(const b of [[-70,90],[-24,150]]){ box(b[0],-.75,b[1],.9,.9,.9,C.red); box(b[0],-.1,b[1],.3,.3,.3,[1,.35,.25],3) }
 }
 
-const WIND=[[118,58],[134,74],[150,58],[166,78],[126,96],[156,100]];
 /* ---------- the anchorage and its fixed waiting spots ---------- */
 const ANCH={x0:-50,x1:50,z0:17,z1:55};
 const ANCH_BUOYS=(()=>{const o=[]; for(let x=ANCH.x0;x<=ANCH.x1;x+=12.5){o.push([x,ANCH.z0],[x,ANCH.z1])} for(let z=ANCH.z0+9.5;z<ANCH.z1;z+=9.5){o.push([ANCH.x0,z],[ANCH.x1,z])} return o})();
 const ANCH_SPOTS=[0,1,2,3,4,5,6,7,8].map(q=>[-28+(q%3)*28+((q/3|0)%2)*8,25+((q/3)|0)*11]);
 let anchUse=[];
 const ZONES=[{h:"<b>Anchorage</b>ships wait here until a berth is free",x:-36,y:2.2,z:ANCH.z0+1},
-  {h:"<b>Gate</b>road trucks collect import boxes",x:34.5,y:4.2,z:-24.5}];
+  {h:"<b>Gate</b>road trucks collect import boxes",x:34.5,y:4.2,z:-24.5},
+  {h:"<b>Shark Island</b>",x:-74,y:2.6,z:40},
+  {h:"<b>Khor Fakkan</b>city and beach across the bay",x:70,y:9,z:SHORE(70)-14}];
 function zoneTags(){ anchUse=[]; ZONES.forEach(z=>{z.el=tag("zone",z.h)}) }
 function drawZones(){ ZONES.forEach(z=>{ if(z.el) place(z.el,project(z.x,z.y,z.z),true) }) }
 
@@ -967,11 +997,8 @@ function vehicle(x,z,r,col,long,lights){
   if(lights){ for(const s of [-.15,.15]){ P(long?.76:.48,.26,s,.02,.07,.09,C.lamp,3); P(long?-.76:-.48,.26,s,.02,.06,.08,[1,.18,.12],3) } } }
 function drawLife(dt,time){
   const tm=reduced?0:time;
-  box(-74,3.4,40,.7,.6,.7,(Math.sin(tm*1.6)>.6)?C.lamp:C.dark,3);
   // pilot boat on patrol outside the anchorage
   { const a=tm*.05, x=8+Math.cos(a)*62, z=62+Math.sin(a)*9; drawTug(x,z,Math.atan2(-Math.cos(a)*9,-Math.sin(a)*62),true) }
-  // offshore wind turbines turning
-  WIND.forEach(([x,z],i)=>{ const a0=tm*(.9+i*.07)+i; for(let b=0;b<3;b++){ const a=a0+b*2.094, ex=x+Math.cos(a)*4.6, ey=13.1+Math.sin(a)*4.6; seg(x,13.1,z+.55,ex,ey,z+.55,.16,C.white,9) } box(x,13.1,z+.55,.4,.4,.3,C.grey) });
   // ships passing on the horizon, and two sailing boats
   for(let i=0;i<3;i++){ const dir=i%2?1:-1, x=(((tm*(.9+i*.3)+i*140)%420)-210)*dir, z=112+i*7, y=dir>0?0:Math.PI, c=[C.dark,C.boot,C.shed2][i];
     const P=(lx,ly,lz,sx,sy,sz,cc,k)=>{const p=local(x,z,y,lx,lz);box(p[0],ly,p[1],sx,sy,sz,cc,k,y)};
@@ -979,27 +1006,18 @@ function drawLife(dt,time){
   for(let i=0;i<2;i++){ const a=tm*.03+i*3, x=(i?-100:95)+Math.cos(a)*14, z=(i?70:30)+Math.sin(a)*8, y=Math.atan2(-Math.cos(a)*8,-Math.sin(a)*14);
     const P=(lx,ly,lz,sx,sy,sz,cc)=>{const p=local(x,z,y,lx,lz);box(p[0],ly,p[1],sx,sy,sz,cc,0,y)};
     P(0,-.82,0,2.4,.36,.8,C.white); P(.1,1.2,0,.05,3.6,.05,C.steel); for(let k=0;k<6;k++) P(-.1-k*.14,.2+k*.5,0,1.5-k*.24,.5,.03,C.white) }
-  // the flare at the tank farm, chimney smoke, the radio mast's warning lights
-  { const fl=.5+.5*Math.sin(tm*9)*Math.sin(tm*5.3); box(98,10.6+fl*.25,-16,.5+fl*.2,.9+fl*.5,.5+fl*.2,[1,.55+fl*.2,.12],3); box(98,11.3+fl*.4,-16,.25,.5,.25,[1,.85,.3],3) }
-  smoke(-18,9.4,-58,time,6,[.82,.84,.86],.12,7); smoke(28,9.4,-58,time,6,[.82,.84,.86],.1,7);
-  box(-64,17.2,-66,.3,.3,.3,(Math.sin(tm*2.2)>0)?[1,.2,.15]:C.dark,3);
-  // the public road: cars both ways
-  for(let i=0;i<9;i++){ const dir=i%2?1:-1, sp=5+(hash(i,3)%5), x=((tm*sp+i*37)%240-120)*dir; vehicle(x,-37.6+dir*-.7,dir>0?0:Math.PI,[SHIPC[1],SHIPC[2],C.white,C.grey,SHIPC[4],C.city,SHIPC[0]][i%7],i%4===0,true) }
-  // road trucks: in through the gate empty, out with an import box (the "boxes delivered" KPI, as you would see it)
-  const IN=[[78,-38.3],[35.3,-38.3],[35.3,-25.4],[35.3,-21.6],[16+0,-21.6]], OUT=[[16,-21.6],[33.7,-21.6],[33.7,-25.4],[33.7,-36.9],[78,-36.9]];
-  for(let i=0;i<3;i++){ const u=((tm/34)+i/3)%1; let q;
-    if(u<.2)q=along(IN,u/.2*.62); else if(u<.25)q=along(IN,.62); else if(u<.45)q=along(IN,.62+(u-.25)/.2*.38); else if(u<.55)q=along(IN,.9999);
-    else if(u<.75)q=along(OUT,(u-.55)/.2*.36); else if(u<.8)q=along(OUT,.36); else q=along(OUT,.36+(u-.8)/.2*.64);
+  // cars on the back road and along the Khor Fakkan corniche, both ways
+  for(let i=0;i<12;i++){ const dir=i%2?1:-1, sp=4.5+(hash(i,3)%5), u=((tm*sp/ROADLEN+i/12)%1+1)%1, q=along(ROAD,dir>0?u:1-u), p=local(q[0],q[1],q[2],0,dir>0?.7:-.7);
+    vehicle(p[0],p[1],q[2]+(dir>0?0:Math.PI),[SHIPC[1],SHIPC[2],C.white,C.grey,SHIPC[4],C.city,SHIPC[0]][i%7],i%4===0,true) }
+  // road trucks: in from the city along the back road, through the gate empty, out with an import box (the "boxes delivered" KPI)
+  for(let i=0;i<3;i++){ const u=((tm/60)+i/3)%1; let q;
+    if(u<.3)q=along(TIN,u/.3*GIN); else if(u<.34)q=along(TIN,GIN); else if(u<.45)q=along(TIN,GIN+(u-.34)/.11*(1-GIN)); else if(u<.55)q=along(TIN,.9999);
+    else if(u<.6)q=along(TOUT,(u-.55)/.05*GOUT); else if(u<.64)q=along(TOUT,GOUT); else q=along(TOUT,GOUT+(u-.64)/.36*(1-GOUT));
     const tr=roadTrucks[i]||(roadTrucks[i]={x:q[0],z:q[1],r:q[2]}), k=1-Math.exp(-dt*6); tr.x=lerp(tr.x,q[0],k); tr.z=lerp(tr.z,q[1],k); tr.r=angTo(tr.r,q[2],1-Math.exp(-dt*5));
     if(Math.hypot(tr.x-q[0],tr.z-q[1])>30){tr.x=q[0];tr.z=q[1];tr.r=q[2]}
-    truckBody(tr.x,tr.z,tr.r,u>=.5,hash(i,(tm/34+i/3)|0),true,[SHIPC[0],SHIPC[4],SHIPC[2]][i]) }
-  const gateUp=k=>{const u=((tm/34)+k/3)%1; return (u>.19&&u<.27)||(u>.74&&u<.82)}; const anyIn=[0,1,2].some(k=>{const u=((tm/34)+k/3)%1;return u>.19&&u<.27}), anyOut=[0,1,2].some(k=>{const u=((tm/34)+k/3)%1;return u>.74&&u<.82});
+    truckBody(tr.x,tr.z,tr.r,u>=.5,hash(i,(tm/60+i/3)|0),true,[SHIPC[0],SHIPC[4],SHIPC[2]][i]) }
+  const anyIn=[0,1,2].some(k=>{const u=((tm/60)+k/3)%1;return u>.29&&u<.35}), anyOut=[0,1,2].some(k=>{const u=((tm/60)+k/3)%1;return u>.59&&u<.65});
   box(35.3,anyIn?1.3:.55,-25.9,.05,anyIn?1.5:.05,.05,C.red); box(33.7,anyOut?1.3:.55,-25.9,.05,anyOut?1.5:.05,.05,C.red);
-  // the freight train: a locomotive and container wagons, passing every minute and a half
-  { const x0=((tm*4.2)%330)-190; if(x0>-150&&x0<150){
-      box(x0,.75,-42,3.4,1.1,1.0,C.yellow); box(x0+.9,1.45,-42,1.2,.4,.95,C.dark); box(x0-.6,.4,-42,3.6,.3,1.05,C.dark); box(x0+1.72,.8,-42,.03,.2,.5,C.lamp,3);
-      for(let w=1;w<=12;w++){ const x=x0-w*3.05-.6; if(x<-128)break; box(x,.3,-42,2.85,.14,.9,C.dark); for(const s of [-.9,.9]) box(x+s,.16,-42,.5,.2,1.0,C.tyre);
-        if(hash(w,9)%6) { box(x-.7,.72,-42,1.3,.62,.6,PAL.standard[hash(w,2)%8],2); box(x+.7,.72,-42,1.3,.62,.6,PAL.standard[hash(w,5)%8],2) } } } }
   // people on the quay in hi-vis, walking their beat
   for(let i=0;i<9;i++){ const bx=-34+i*8.6, x=bx+Math.sin(tm*.22+i*1.9)*2.6, z=-6.4-(i%3)*.25, st=Math.sin(tm*5+i)*.05*Math.abs(Math.cos(tm*.22+i*1.9));
     box(x-.05+st,.16,z,.07,.32,.09,C.dark); box(x+.05-st,.16,z,.07,.32,.09,C.dark); box(x,.47,z,.2,.3,.14,[1,.82,.1]); box(x,.47,z,.21,.05,.15,C.white); box(x,.7,z,.12,.14,.12,[.86,.68,.55]); box(x,.79,z,.14,.06,.14,C.white) }
@@ -1007,6 +1025,10 @@ function drawLife(dt,time){
   for(let j=0;j<5;j++) box(11.14+j*.22,8.22,-27.4+Math.sin(tm*4.2-j*.9)*.03*(j+1),.23,.34,.03,j%2?C.white:SHIPC[0]);
 }
 let roadTrucks=[];
+const TIN=[[-30,SHORE(-30)-6.6],[-46,SHORE(-46)-6.6],[-54.6,-42],[-50,-35.7],[35.3,-35.7],[35.3,-25.4],[35.3,-21.6],[16,-21.6]],
+      TOUT=[[16,-21.6],[33.7,-21.6],[33.7,-25.4],[33.7,-34.3],[-50,-34.3],[-53.4,-41.6],[-46,SHORE(-46)-5.4],[-30,SHORE(-30)-5.4]];
+function plen(p,n){let d=0; for(let i=1;i<=n;i++)d+=Math.hypot(p[i][0]-p[i-1][0],p[i][1]-p[i-1][1]); return d}
+const GIN=(plen(TIN,4)+8.5)/plen(TIN,TIN.length-1), GOUT=(plen(TOUT,2)+1.8)/plen(TOUT,TOUT.length-1);
 
 /* ---------- yard stacks and the gantry cranes (RTGs) over them ---------- */
 function drawYard(dt,time){
@@ -1789,13 +1811,13 @@ function loop(now){
 /* ====================================================================== light / dark */
 function css(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()||"#888"}
 const SCENE={
-  light:{C:{sea:"#2d7fa3",ground:"#a9b3a5",apron:"#b9bdb8",road:"#7f878a",pad:"#a3a8a5",paint:"#f4f4ef",yellow:"#e8a43a",craneY:"#e8a43a",steel:"#8d999e",
+  light:{C:{sea:"#2d7fa3",ground:"#bfb8a6",land:"#cdb894",sand:"#e8d9b5",sand2:"#cbb78f",mtn:"#a38d74",mtn2:"#8c7865",mtn3:"#b6a48e",town:"#f1ece1",town2:"#dcd2be",dome:"#e3cf98",reef:"#5fb7c0",palm:"#6f9446",palm2:"#587a36",apron:"#b9bdb8",road:"#7f878a",pad:"#a3a8a5",paint:"#f4f4ef",yellow:"#e8a43a",craneY:"#e8a43a",steel:"#8d999e",
     white:"#f2f4f2",grey:"#a8b0b3",red:"#d0553f",shed:"#c9cfd0",shed2:"#9fb1b8",dark:"#4a5459",boot:"#8a3a2c",cab:"#f1f3f1",teal:"#e8e4d8",
     tyre:"#2b2f33",glass:"#5d7d93",trunk:"#6b5038",tree:"#6a9a52",tree2:"#4f8046",rock:"#8f938d",city:"#b9c3c9",city2:"#a7b3ba",hill:"#a3b59c",foam:"#f4f8f8",tug:"#c4452f",truck:"#eef0ee",rtg:"#e8b13a",roof:"#8e9aa0"},
     lamp:[1,.95,.8],win:[.62,.78,.88],fog:"#e3ecf0",
     S:{multi:"#2f6f9e",nocoord:"#7fb0d3",single:"#c4962c",fcfs:"#a29d93"},
     A:{berth:"#2f6f9e",crane:"#c46f1c",yard:"#2e8b62",trucks:"#7a5fb5",supervisor:"#9a7a12",llm:"#9a7a12",skeleton:"#7d786f",single:"#a87d1c",judges:"#c46f1c",operator:"#c46f1c"}},
-  dark:{C:{sea:"#0e2b40",ground:"#1a222b",apron:"#283139",road:"#161d25",pad:"#222b34",paint:"#8f9aa3",yellow:"#e0a03a",craneY:"#d99a35",steel:"#4a5763",
+  dark:{C:{sea:"#0e2b40",ground:"#1a222b",land:"#1f1d1a",sand:"#2a2721",sand2:"#221f1b",mtn:"#1a1816",mtn2:"#151311",mtn3:"#22201c",town:"#262b33",town2:"#1e222a",dome:"#3a3426",reef:"#123a3e",palm:"#1b2b1d",palm2:"#152318",apron:"#283139",road:"#161d25",pad:"#222b34",paint:"#8f9aa3",yellow:"#e0a03a",craneY:"#d99a35",steel:"#4a5763",
     white:"#c3ccd4",grey:"#55606a",red:"#c8503f",shed:"#28323e",shed2:"#334356",dark:"#0a1017",boot:"#6b2e24",cab:"#c0c8cf",teal:"#334052",
     tyre:"#07090c",glass:"#2a3d52",trunk:"#241b14",tree:"#1d3326",tree2:"#172a1f",rock:"#272c32",city:"#16202d",city2:"#121b27",hill:"#0f1820",foam:"#6f8396",tug:"#7d2f24",truck:"#a9b3bc",rtg:"#b98a32",roof:"#26313d"},
     lamp:[1,.88,.55],win:[1,.8,.45],fog:"#13243a",
