@@ -268,7 +268,7 @@
 
   /* ---------- camera ---------- */
   const CAMS = {
-    sea: { tx: 0, tz: 30, yaw: 0.5, pitch: 0.42, dist: 72 },
+    sea: { tx: -6, tz: 36, yaw: 0.5, pitch: 0.42, dist: 80 },
     over: { tx: 2, tz: 8, yaw: 0.42, pitch: 0.36, dist: 74 },
     quay: { tx: -4, tz: 0, yaw: -0.25, pitch: 0.22, dist: 44 },
     yard: { tx: 0, tz: -15, yaw: 2.7, pitch: 0.62, dist: 52 },
@@ -1082,7 +1082,7 @@
   }
 
   /* ---------- the anchorage and its fixed waiting spots ---------- */
-  const ANCH = { x0: -50, x1: 50, z0: 17, z1: 55 };
+  const ANCH = { x0: -52, x1: 44, z0: 29, z1: 64 };
   const ANCH_BUOYS = (() => {
     const o = [];
     for (let x = ANCH.x0; x <= ANCH.x1; x += 12.5) {
@@ -1093,10 +1093,9 @@
     }
     return o;
   })();
-  const ANCH_SPOTS = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((q) => [
-    -28 + (q % 3) * 28 + (((q / 3) | 0) % 2) * 8,
-    25 + ((q / 3) | 0) * 11,
-  ]);
+  // six spots side by side, every ship facing the port, with a clear gap between neighbours (ships pass through the gaps)
+  const SLOT_Z = 46.5,
+    ANCH_SPOTS = [0, 1, 2, 3, 4, 5].map((q) => [-44 + q * 16, SLOT_Z]);
   let anchUse = [];
   const ZONES = [
     {
@@ -1179,12 +1178,12 @@
   }
   function drawLife(dt, time) {
     const tm = reduced ? 0 : time;
-    // pilot boat on patrol outside the anchorage
+    // pilot boat on patrol behind the anchorage (clear of the anchored ships, the channels and the arrival lane)
     {
       const a = tm * 0.05,
-        x = 8 + Math.cos(a) * 62,
-        z = 62 + Math.sin(a) * 9;
-      drawTug(x, z, Math.atan2(-Math.cos(a) * 9, -Math.sin(a) * 62), true);
+        x = -4 + Math.cos(a) * 44,
+        z = 75 + Math.sin(a) * 5;
+      drawTug(x, z, Math.atan2(-Math.cos(a) * 5, -Math.sin(a) * 44), true);
     }
     // ships passing on the horizon, and two sailing boats
     for (let i = 0; i < 3; i++) {
@@ -1449,64 +1448,296 @@
                 : "finished, sailing";
     return { st, bi, nc, nt, dis, load, warn, s };
   }
+  /* ---------- water traffic: a traffic separation scheme, like a real port ----------
+   inbound channel on the west side, outbound channel on the east side; ships never wait on each other,
+   so a ship is always where the simulator says it is (it hurries if it falls behind):
+   - in from sea: up the west channel, then east along the approach lane (or behind the anchorage to a spot)
+   - anchored ships lie side by side facing the port; out of a spot: straight north into an approach lane
+   - into a berth: along the approach lane to the gate off the berth, then straight in
+   - leaving: fast, straight back off the quay into that berth's own departure lane (B3 nearest the quay,
+     B1 furthest out, so no departing ship backs into one passing in front), east, out through the east channel */
+  const LANE_E = 21,
+    LANE_W = 25.5,
+    IN_X = -59,
+    SEA_Z = 88,
+    DEP_Z = [16.5, 12, 7.5],
+    OUT_X = [50, 56, 62]; // per berth B1, B2, B3
+  function nearest(xs, x) {
+    return xs.reduce((a, b) => (Math.abs(b - x) < Math.abs(a - x) ? b : a));
+  }
+  const GAPS = [-36, -20, -4, 12, 28]; // clear water between the anchorage spots
+  function route(sh, st, bi, tx, tz) {
+    if (st === 0) return [];
+    const hidden = sh.z >= 133;
+    if (hidden) {
+      sh.x = IN_X;
+      sh.z = Math.max(134, inboundTail() + 34);
+      sh.s = 0;
+      sh.yaw = Math.PI / 2;
+    }
+    const inChannel = Math.abs(sh.x - IN_X) < 1.5 && sh.z > LANE_E,
+      behind = !inChannel && sh.z > ANCH.z1 + 3,
+      inSlot = !inChannel && !behind && sh.z > ANCH.z0 - 2;
+    if (st === 1) {
+      if (inChannel)
+        return [
+          [IN_X, SEA_Z],
+          [tx, SEA_Z],
+          [tx, tz],
+        ];
+      if (behind)
+        return [
+          [sh.x, SEA_Z],
+          [tx, SEA_Z],
+          [tx, tz],
+        ];
+      const g = nearest(GAPS, sh.x);
+      return inSlot
+        ? [
+            [g, sh.z],
+            [g, SEA_Z],
+            [tx, SEA_Z],
+            [tx, tz],
+          ]
+        : [
+            [g, LANE_W],
+            [g, SEA_Z],
+            [tx, SEA_Z],
+            [tx, tz],
+          ];
+    }
+    if (st === 2 || st === 3) {
+      const r = [];
+      if (inChannel) r.push([IN_X, LANE_E]);
+      else if (behind) {
+        const g = nearest(GAPS, sh.x);
+        r.push([g, sh.z], [g, tx >= g ? LANE_E : LANE_W]);
+      } else if (inSlot) r.push([sh.x, tx >= sh.x ? LANE_E : LANE_W]);
+      const lz = r.length
+        ? r[r.length - 1][1]
+        : sh.z > LANE_E + 2
+          ? LANE_W
+          : LANE_E;
+      if (!r.length && sh.z < LANE_E - 1) r.push([sh.x, lz]);
+      r.push([tx, lz, "gate"], [tx, tz]);
+      return r;
+    }
+    const dz = DEP_Z[bi] ?? DEP_Z[0],
+      ox = OUT_X[bi] ?? OUT_X[2];
+    if (sh.z < 6)
+      return [
+        [sh.x, dz],
+        [ox, dz],
+        [ox, 150],
+      ];
+    if (sh.z < ANCH.z0 - 2)
+      return [
+        [sh.x, LANE_E],
+        [ox, LANE_E],
+        [ox, 150],
+      ];
+    const g = nearest(GAPS, sh.x);
+    return [
+      [g, sh.z],
+      [g, 150],
+    ];
+  }
+  function inboundTail() {
+    let m = 0;
+    ships.forEach((o) => {
+      if (Math.abs(o.x - IN_X) < 1 && o.z > SEA_Z && o.zv < 0)
+        m = Math.max(m, o.z);
+    });
+    return m;
+  }
+  // last-resort check at the gate: a ship from the berth it is going to (or one passing in front of it) still there?
+  function gateClear(i, bx) {
+    const me = ships[i];
+    return ships.every(
+      (o, j) =>
+        j === i ||
+        o.z > LANE_E - 2 ||
+        o.z > 133 ||
+        (Math.abs(o.z - 2.35) < 0.4 &&
+          Math.hypot(o.xv || 0, o.zv || 0) < 0.3) ||
+        Math.abs(o.x - bx) > (me.L + o.L) / 2 + 2,
+    );
+  }
+  function moveShip(sh, i, fs, dt, tm, V0) {
+    const [st, bi, nc, nt, dis, load] = fs[i];
+    let tx, tz;
+    // a ship keeps one waiting spot in the anchorage for as long as it waits; spots fill from the middle
+    if (st === 1 && sh.spot == null) {
+      const ord = [3, 2, 4, 1, 5, 0],
+        inUse = (k) =>
+          ships.some(
+            (o, j) =>
+              j !== i &&
+              o.z < 133 &&
+              Math.abs(o.x - ANCH_SPOTS[k][0]) < 4 &&
+              o.z > ANCH.z0 - 8 &&
+              o.z < ANCH.z1 + 4,
+          );
+      let q = ord.find((k) => anchUse[k] == null && !inUse(k));
+      if (q == null) q = ord.find((k) => anchUse[k] == null);
+      if (q == null) q = i % ANCH_SPOTS.length;
+      sh.spot = q;
+      anchUse[q] = i;
+    }
+    if (st !== 1 && sh.spot != null) {
+      if (anchUse[sh.spot] === i) anchUse[sh.spot] = null;
+      sh.spot = null;
+    }
+    if (st === 0) {
+      tx = IN_X;
+      tz = 150;
+    } else if (st === 1) {
+      [tx, tz] = ANCH_SPOTS[sh.spot];
+    } else if (st <= 3) {
+      tx = BERTHS[bi].x;
+      tz = 2.35;
+    } else {
+      tx = OUT_X[sh.lbi ?? 2];
+      tz = 150;
+    }
+    const sig =
+      st + ":" + (st >= 2 && st <= 3 ? bi : "") + ":" + (sh.spot ?? "");
+    if (snap) {
+      sh.x = tx;
+      sh.z = tz;
+      sh.yaw = st === 1 ? Math.PI / 2 : st >= 4 ? -Math.PI / 2 : 0;
+      sh.xv = sh.zv = 0;
+      sh.route = [];
+      sh.sig = sig;
+      sh.sigT = T;
+      sh.lbi = bi;
+    }
+    if (sh.sig !== sig) {
+      const was = sh.lbi;
+      sh.sig = sig;
+      sh.sigT = T;
+      sh.route = route(sh, st, st >= 4 ? (was ?? bi) : bi, tx, tz);
+    }
+    if (st >= 2 && st <= 3) sh.lbi = bi;
+    if (!sh.route.length && st !== 0 && Math.hypot(tx - sh.x, tz - sh.z) > 0.05)
+      sh.route = [[tx, tz]];
+    // speed: leaving ships go 2.5x so the berth is free before the next ship gets there; anyone behind the simulator hurries
+    const late = Math.max(0, T - (sh.sigT ?? T) - 0.5),
+      V = V0 * (st >= 4 ? 2.5 : 1) * Math.min(5, 1 + late * 3),
+      A = V * 2.2;
+    // distance to the next place it has to stop: a gate that is not clear yet, or the end of its route
+    const open = gateClear(i, tx) || T - (sh.sigT ?? T) > 0.5;
+    let stopD = 0,
+      px = sh.x,
+      pz = sh.z,
+      hold = false;
+    for (const w of sh.route) {
+      stopD += Math.hypot(w[0] - px, w[1] - pz);
+      px = w[0];
+      pz = w[1];
+      if (w[2] === "gate" && !open) {
+        hold = true;
+        break;
+      }
+    }
+    let want = Math.min(V, Math.sqrt(2 * A * stopD));
+    // keep a safe distance behind a ship ahead in the same lane (never catch it up, even when hurrying)
+    let ux = 0,
+      uz = 0;
+    if (sh.route.length) {
+      const w = sh.route[0],
+        d = Math.hypot(w[0] - sh.x, w[1] - sh.z);
+      if (d > 1e-6) {
+        ux = (w[0] - sh.x) / d;
+        uz = (w[1] - sh.z) / d;
+      }
+    }
+    if (ux || uz)
+      for (const o of ships) {
+        if (o === sh) continue; // hidden ships queue too, so none overtakes out of sight
+        const rx = o.x - sh.x,
+          rz = o.z - sh.z,
+          along = rx * ux + rz * uz,
+          side = Math.abs(rx * uz - rz * ux);
+        if (along <= 0 || side > 3.6) continue;
+        // only queue behind a ship going the same way; a stopped or crossing ship is never waited on (no deadlocks)
+        const os = Math.hypot(o.xv || 0, o.zv || 0),
+          ov = (o.xv || 0) * ux + (o.zv || 0) * uz;
+        // a ship pausing to turn at a corner is queued behind too (it is about to move on)
+        if (!o.turning && (os < 0.5 || ov < 0.7 * os)) continue;
+        const gap = along - (sh.L + o.L) / 2;
+        if (gap < 4) want = Math.min(want, Math.max(0, ov * (gap / 4)));
+        else if (gap < 14) want = Math.min(want, ov + ((gap - 4) * V) / 10);
+      }
+    sh.turning = false;
+    // turn at a corner before setting off on the next leg, so a long hull never swings into a neighbour
+    if (st >= 1 && st <= 3 && sh.route.length) {
+      const n0 = sh.route.length,
+        y0 =
+          st === 1 ? (n0 === 2 ? 0 : Math.PI / 2) : n0 >= 3 ? Math.PI / 2 : 0;
+      let dy =
+        Math.abs(((y0 - sh.yaw) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      if (dy > Math.PI) dy = 2 * Math.PI - dy;
+      sh.turning = dy > 0.5;
+      if (sh.turning) want = Math.min(want, V * 0.08);
+    }
+    sh.s = Math.min(want, (sh.s || 0) + A * dt);
+    // move exactly along the route line: it can never overshoot a corner or cut across anything
+    let move = Math.min(sh.s * dt, stopD);
+    while (sh.route.length) {
+      const w = sh.route[0],
+        dx = w[0] - sh.x,
+        dz = w[1] - sh.z,
+        d = Math.hypot(dx, dz);
+      if (d > 1e-6) {
+        ux = dx / d;
+        uz = dz / d;
+      }
+      if (move >= d) {
+        sh.x = w[0];
+        sh.z = w[1];
+        move -= d;
+        if (w[2] === "gate" && hold) break;
+        sh.route.shift();
+        if (move <= 1e-9) break;
+      } else {
+        sh.x += ux * move;
+        sh.z += uz * move;
+        break;
+      }
+    }
+    if (!sh.route.length) sh.s = 0;
+    sh.xv = ux * sh.s;
+    sh.zv = uz * sh.s;
+    const vx = sh.xv,
+      vz = sh.zv;
+    const speed = Math.hypot(vx, vz),
+      far = Math.hypot(tx - sh.x, tz - sh.z);
+    // heading by stage of the route: in the harbour tugs move ships sideways, so they turn only at the corners
+    // (bow to the port in the channels and at anchor, bow east along the lanes and at the berth, south when leaving)
+    const n = sh.route.length,
+      anch = st === 1 && !n && far < 3;
+    let yt = sh.yaw;
+    if (anch) yt = Math.PI / 2 + Math.sin(tm * 0.13 + i * 2.1) * 0.05;
+    else if (st === 1) yt = n === 2 ? 0 : Math.PI / 2;
+    else if (st === 2 || st === 3) yt = n >= 3 ? Math.PI / 2 : 0;
+    else if (st >= 4) yt = n >= 2 ? 0 : -Math.PI / 2;
+    sh.yaw = angTo(sh.yaw, yt, 1 - Math.exp(-dt * 3.2));
+    sh._m = { tx, tz, speed };
+  }
   function drawShips(dt, time) {
     const fs = run.F[fi][0];
     const tm = reduced ? 0 : time;
+    const rate = +$("#rate").value || 2,
+      V0 = clamp(120 * rate, 18, 480); // about an hour and a half for a whole route
+    // small fixed steps, so where a ship ends up never depends on the frame rate
+    const steps = Math.max(1, Math.ceil(dt / (1 / 40))),
+      h = dt / steps;
+    for (let k = 0; k < steps; k++)
+      ships.forEach((sh, i) => moveShip(sh, i, fs, h, tm, V0));
     ships.forEach((sh, i) => {
-      const [st, bi, nc, nt, dis, load] = fs[i];
-      let tx, tz;
-      // a ship keeps one waiting spot in the anchorage for as long as it waits
-      if (st === 1 && sh.spot == null) {
-        let q = ANCH_SPOTS.findIndex((_, k) => anchUse[k] == null);
-        if (q < 0) q = i % ANCH_SPOTS.length;
-        sh.spot = q;
-        anchUse[q] = i;
-      }
-      if (st !== 1 && sh.spot != null) {
-        if (anchUse[sh.spot] === i) anchUse[sh.spot] = null;
-        sh.spot = null;
-      }
-      if (st === 0) {
-        tx = 66;
-        tz = 136;
-      } else if (st === 1) {
-        [tx, tz] = ANCH_SPOTS[sh.spot];
-      } else if (st <= 3) {
-        tx = BERTHS[bi].x;
-        tz = 2.35;
-      } else {
-        tx = 66;
-        tz = 150;
-      }
-      if (snap) {
-        sh.x = tx;
-        sh.z = tz;
-        sh.yaw = st === 1 ? 0.12 : 0;
-        sh.xv = sh.zv = sh.yawv = 0;
-      }
-      // leaving: back straight off the quay first, then out through the channel
-      const leaving = st >= 4 && sh.z < 16,
-        gx = leaving ? sh.x + 6 : tx,
-        gz = leaving ? 18 : tz;
-      // ships keep pace with the simulation speed: stately at 0.5 h/s, brisk at 10 h/s, so they never lag behind what happened
-      const pace = clamp((+$("#rate").value || 2) / 0.6, 1, 14),
-        sT = 3.0 / Math.sqrt(pace),
-        mV = 12 * pace;
-      sdamp(sh, "x", gx, sT, mV, dt);
-      sdamp(sh, "z", gz, sT, mV, dt);
-      const speed = Math.hypot(sh.xv || 0, sh.zv || 0),
-        far = Math.hypot(tx - sh.x, tz - sh.z);
-      const yt =
-        speed > 1.5 && far > 16 && !leaving
-          ? Math.atan2(-sh.zv, sh.xv)
-          : st === 1
-            ? 0.12 + Math.sin(tm * 0.13 + i * 2.1) * 0.07
-            : 0;
-      sh.yaw = angTo(
-        sh.yaw,
-        yt,
-        1 - Math.exp(-dt * (speed > 1.5 ? 1.1 : 0.7) * Math.sqrt(pace)),
-      );
+      const [st, bi, nc, nt, dis, load] = fs[i],
+        { tx, tz, speed } = sh._m;
       if (sh.z > 133) {
         sh.el.hidden = true;
         sh.sx = null;
@@ -2005,7 +2236,8 @@
               0.22,
               age,
               LIFE,
-            ); // the arc only from a ship alongside
+            );
+          // the arc only from a ship alongside
           else {
             const r = Math.max(0, 1 - age / LIFE);
             for (let i = 0; i < 16; i++) {
@@ -3266,8 +3498,8 @@
         i,
         L,
         nb: Math.max(4, Math.floor((L - 4.6) / 1.22)),
-        x: 66,
-        z: 136,
+        x: -62,
+        z: 140,
         yaw: 0,
         spot: null,
         max: Math.max(s.dis, s.load, 1),
@@ -3524,12 +3756,22 @@
     if (!x || !META) return;
     const [g, w, h] = x;
     const L = 44,
-      R = 150,
+      R = Math.min(220, Math.max(150, w * 0.28)),
       T = 12,
       B = 26,
       ymax =
-        Math.max(10, ...order.flatMap((k) => SYS[k].hist.map((p) => p[1]))) *
-        1.1,
+        Math.max(
+          10,
+          ...order.flatMap((k) =>
+            SYS[k].hist
+              .map((p) => p[1])
+              .concat(
+                SYS[k].done && !SYS[k].err
+                  ? [+SYS[k].done.honest_turnaround_h || 0]
+                  : [],
+              ),
+          ),
+        ) * 1.1,
       X = (t) => L + (t / META.end_h) * (w - L - R),
       Y = (v) => T + (1 - v / ymax) * (h - T - B);
     g.font = "11px IBM Plex Mono, monospace";
@@ -3558,7 +3800,16 @@
     const ends = [];
     order.forEach((k) => {
       const S = SYS[k],
-        p = S.hist;
+        p = S.hist.slice();
+      if (!p.length) return;
+      // end the line at the same figure the KPI table shows: the simulator's final number, or now while running
+      const fin = S.done && !S.err ? S.done.honest_turnaround_h : null,
+        endT = fin != null ? META.end_h : S.nowT,
+        endV = fin != null ? fin : honestAt(S, S.nowT);
+      if (endV != null && isFinite(+endV)) {
+        while (p.length && p[p.length - 1][0] >= endT) p.pop();
+        p.push([endT, +endV]);
+      }
       if (p.length < 2) return;
       g.strokeStyle = SCOL[k];
       g.lineWidth = k === "multi" ? 2.5 : 1.6;
@@ -4472,8 +4723,9 @@
 
   function loop(now) {
     const dt = Math.min(0.1, (now - last) / 1000),
+      dtShips = Math.min(1, (now - last) / 1000),
       time = now / 1000;
-    last = now;
+    last = now; // ships use real time so they keep up on a slow machine
     if (page === "live") {
       const S0 =
         META && SYS[watching] && SYS[watching].F.length ? SYS[watching] : null;
@@ -4496,7 +4748,7 @@
         drawLife(dt, time);
         drawZones();
         drawYard(dt, time);
-        drawShips(dt, time);
+        drawShips(dtShips, time);
         drawCranes(dt, time);
         drawTrucks(dt, time);
         drawBirds(time);
